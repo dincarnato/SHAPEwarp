@@ -1,0 +1,11 @@
+[package]
+name = "kmer-lookup-perl"
+version = "0.1.0"
+edition = "2018"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+kmer-lookup = { path = "./kmer-lookup" }
+cstr = "0.2.8"
