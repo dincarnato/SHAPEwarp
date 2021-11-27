@@ -5,9 +5,10 @@ my $fbmm = FFI::Build::MM->new;
 
 WriteMakefile($fbmm->mm_args(
     ABSTRACT       => 'SHAPEwarp',
-    DISTNAME       => 'SW',
-    NAME           => 'SW',
-    VERSION_FROM   => 'lib/SW.pm',
+    DISTNAME       => 'SW-KmerLookup',
+    NAME           => 'SW::KmerLookup',
+    PARENTNAME     => 'SW::KmerLookup',
+    VERSION_FROM   => 'lib/SW/KmerLookup.pm',
     BUILD_REQUIRES => {
         'FFI::Build::MM'          => '1.00',
         'FFI::Build::File::Cargo' => '0.07',

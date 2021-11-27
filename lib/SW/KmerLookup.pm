@@ -5,8 +5,10 @@ use Core::Utils;
 use Core::Mathematics qw(:all);
 use FFI::Platypus 1.00;
 
+our $VERSION = '0.1.0';
+
 my $ffi = FFI::Platypus->new( api => 1, lang => 'Rust' );
-$ffi->bundle('SW');
+$ffi->bundle('SW::KmerLookup');
 
 $ffi->type( 'object(SW::KmerLookup)' => 'KmerLookup' );
 $ffi->type( 'object(SW::KmerLookupBuilder)' => 'KmerLookupBuilder' );
