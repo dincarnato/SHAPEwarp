@@ -1,9 +1,9 @@
 use Test2::V0;
 use File::Basename;
 use File::Spec;
-use SW;
+use SW::KmerLookup;
 
-my $sw = KmerLookup->new(
+my $sw = SW::KmerLookup->new(
     kmerLen => 12,
     maxKmerDist => 10,
     maxMatchesEveryNt => 200,

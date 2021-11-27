@@ -1,19 +1,17 @@
-package SW;
+package SW::KmerLookup;
 
 use strict;
 use Core::Utils;
 use Core::Mathematics qw(:all);
 use FFI::Platypus 1.00;
 
-our $VERSION = '0.1.0';
-
 my $ffi = FFI::Platypus->new( api => 1, lang => 'Rust' );
-$ffi->bundle;
+$ffi->bundle('SW');
 
-$ffi->type( 'object(KmerLookup)' => 'KmerLookup' );
-$ffi->type( 'object(KmerLookupBuilder)' => 'KmerLookupBuilder' );
-$ffi->type( 'object(KmerLookupOkErr)' => 'KmerLookupOkErr' );
-$ffi->type( 'object(KmerLookupResults)' => 'KmerLookupResults' );
+$ffi->type( 'object(SW::KmerLookup)' => 'KmerLookup' );
+$ffi->type( 'object(SW::KmerLookupBuilder)' => 'KmerLookupBuilder' );
+$ffi->type( 'object(SW::KmerLookupOkErr)' => 'KmerLookupOkErr' );
+$ffi->type( 'object(SW::KmerLookupResults)' => 'KmerLookupResults' );
 
 $ffi->mangler(sub {
   my($name) = @_;
@@ -43,7 +41,7 @@ sub new {
                    maxMatchesEveryNt => 0 }, \%parameters);
 
     $self->_validate();
-    $builder = KmerLookupBuilder->new($self->{kmerLen});
+    $builder = SW::KmerLookupBuilder->new($self->{kmerLen});
 
     if ($self->{matchGCcontent}) {
 
@@ -124,9 +122,9 @@ $ffi->attach( run => ['KmerLookup', 'string', 'f64[]', 'usize', 'string'] => 'Km
 });
 $ffi->attach( DESTROY => ['KmerLookup'] => 'void');
 
-package KmerLookupBuilder;
+package SW::KmerLookupBuilder;
 
-our @ISA = qw( KmerLookup );
+our @ISA = qw( SW::KmerLookup );
 
 $ffi->mangler(sub {
   my($name) = @_;
@@ -161,9 +159,9 @@ $ffi->attach( max_matches_every_nt => ['KmerLookupBuilder', 'usize']);
 $ffi->attach( build => ['KmerLookupBuilder'] => 'KmerLookup');
 $ffi->attach( DESTROY => ['KmerLookupBuilder'] => 'void');
 
-package KmerLookupOkErr;
+package SW::KmerLookupOkErr;
 
-our @ISA = qw( KmerLookup );
+our @ISA = qw( SW::KmerLookup );
 
 $ffi->mangler(sub {
   my($name) = @_;
@@ -178,9 +176,9 @@ $ffi->attach( get_ok => ['KmerLookupOkErr'] => 'KmerLookupResults' );
 $ffi->attach( get_err => ['KmerLookupOkErr'] => 'string' );
 $ffi->attach( DESTROY => ['KmerLookupOkErr'] => 'void');
 
-package KmerLookupResults;
+package SW::KmerLookupResults;
 
-our @ISA = qw( KmerLookup );
+our @ISA = qw( SW::KmerLookup );
 
 $ffi->mangler(sub {
   my($name) = @_;
