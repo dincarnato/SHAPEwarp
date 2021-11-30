@@ -1,0 +1,136 @@
+#!/usr/bin/perl
+
+use strict;
+use FindBin qw($Bin);
+use Getopt::Long qw(:config no_ignore_case);
+use Storable;
+
+use lib $Bin . "/lib";
+
+use Core::Mathematics;
+use SW::KmerLookup;
+
+my ($help, $output, $debug, $reactivity,
+    $sequence, $db, $threads, $minKmers,
+    $maxKmerDist, $matchKmerSeq, $kmerMaxSeqDist, $matchKmerGCcontent,
+    $maxKmerGCdiff, $kmerLen, $kmerOffset, $kmerMinComplexity,
+    $kmerMaxMatchEveryNt, $kmerLookup, $maxReactivity, @results);
+
+do {
+
+    local $SIG{__WARN__} = sub { };
+
+    GetOptions( "h|help"                => \$help,
+                "output=s"              => \$output,
+                "db=s"                  => \$db,
+                "react=s"               => \$reactivity,
+                "seq=s"                 => \$sequence,
+                "threads=i"             => \$threads,
+                "minKmers=i"            => \$minKmers,
+                "maxReactivity=s"       => \$maxReactivity,
+                "maxKmerDist=i"         => \$maxKmerDist,
+                "matchKmerSeq"          => \$matchKmerSeq,
+                "kmerMaxSeqDist=s"      => \$kmerMaxSeqDist,
+                "matchKmerGCcontent"    => \$matchKmerGCcontent,
+                "maxKmerGCdiff=s"       => \$maxKmerGCdiff,
+                "kmerLen=i"             => \$kmerLen,
+                "kmerOffset=i"          => \$kmerOffset,
+                "kmerMinComplexity=s"   => \$kmerMinComplexity,
+                "kmerMaxMatchEveryNt=i" => \$kmerMaxMatchEveryNt,
+                "debug"                 => \$debug ) or help(1);
+
+};
+
+help() if ($help);
+
+$threads ||= 1;
+$minKmers ||= 2;
+$maxKmerDist ||= 30;
+$maxReactivity ||= 1.0;
+$kmerMaxSeqDist //= 0;
+$kmerLen ||= 15;
+$kmerOffset ||= 1;
+$kmerMinComplexity //= 0.3;
+$kmerMaxMatchEveryNt //= 200;
+$output ||= "hsg.sto";
+$reactivity = [ split ",", $reactivity ];
+
+die "\n[!] Error: Specified database file does not exist\n\n" if (!-e $db);
+die "\n[!] Error: No query provided\n\n" if (!@{$reactivity});
+die "\n[!] Error: Different lengths for query reactivity profile and sequence\n\n" if (defined $sequence && length($sequence) != @{$reactivity});
+die "\n[!] Error: Minimum number of kmers must be an INT > 0\n\n" if (!isint($minKmers) || $minKmers <= 0);
+die "\n[!] Error: Maximum kmer distance must be a positive INT\n\n" if (!isint($maxKmerDist) || !ispositive($maxKmerDist));
+die "\n[!] Error: Kmer length must be a positive INT >= 6\n\n" if (!isint($kmerLen) || $kmerLen < 6);
+die "\n[!] Error: Kmer offset must be a positive INT comprised between 1 and kmerLen\n\n" if (!isint($kmerOffset) || $kmerOffset <= 0 || $kmerOffset > $kmerLen);
+die "\n[!] Error: Minimum kmer complexity must be a positive INT\n\n" if (!ispositive($kmerMinComplexity));
+die "\n[!] Error: Maximum kmer sequence distance must be positive\n\n" if (!ispositive($kmerMaxSeqDist));
+die "\n[!] Error: Maximum kmer GC% difference must be positive\n\n" if (defined $maxKmerGCdiff && !ispositive($maxKmerGCdiff));
+die "\n[!] Error: Maximum reactivity must be > 0\n\n" if (!ispositive($maxReactivity) || $maxReactivity == 0);
+
+$kmerLookup = SW::KmerLookup->new( threads           => $threads,
+                                   minKmers          => $minKmers,
+                                   maxKmerDist       => $maxKmerDist,
+                                   matchSequence     => $matchKmerSeq,
+                                   maxSeqDist        => $kmerMaxSeqDist,
+                                   matchGCcontent    => $matchKmerGCcontent,
+                                   maxGCdiff         => $maxKmerGCdiff,
+                                   kmerLen           => $kmerLen,
+                                   offset            => $kmerOffset,
+                                   minComplexity     => $kmerMinComplexity,
+			                       maxReactivity     => $maxReactivity,
+                                   maxMatchesEveryNt => $kmerMaxMatchEveryNt );
+@results = $kmerLookup->run($db, $reactivity, $sequence);
+store(\@results, $output) if ($output);
+
+if ($debug) {
+
+    print join("\n", map { "{ dbId => " . $_->{dbId} . ", " .
+                           "db => [" . join(",", @{$_->{db}}) . "], " .
+                           "query => [" . join(",", @{$_->{query}}) . "] }" } sort { $a->{dbId} cmp $b->{dbId} ||
+                                                                                     $a->{query}->[0] <=> $b->{query}->[0] ||
+                                                                                     $a->{db}->[0] <=> $b->{db}->[0] } @results) . "\n";
+
+}
+
+sub help {
+
+    print "\n  [!] Error: Invalid option. Please check the help\n" if ($_[0]);
+
+    die <<HELP;
+
+ SHAPEwarp Kmer Lookup (v1.0.0a)
+
+ Authors: Edoardo Morandi (emorandi[at]rnaframework.com)
+          Danny Incarnato (dincarnato[at]rnaframework.com)
+ Summary: Given a query and a database, it returns the list of HSGs
+
+ Usage:   swKmerLookup [Options]
+
+ Options                                         Description
+ --output                      <string>          Output file (in Storable format) to store the identified HSGs (Default: hsg.sto)
+ --debug                                         Identified HSGs are printed to screen
+ --db                          <string>          Path to a database folder (generated by swBuildDb)
+ --reacts                      <string>          A comma-separated list of reactivities for the query
+ --seq                         <string>          Nucleotide sequence for the query
+ --threads                     <int>             Number of processors to use (Default: 1)
+ --maxReactivity               <float>           Maximum value to which reactivities will be capped (Default: 1)
+ --minKmers                    <int>             Minimum number of kmers required to form a High Scoring Group (HSG; Default: 2)
+ --maxKmerDist                 <int>             Maximum distance between two kmers to be merged in a HSG (Default: 30)
+ --matchKmerSeq                                  The sequence of a query kmer and the corresponding database match must not differ
+                                                 more than --matchKmerSeq
+ --kmerMaxSeqDist                                Maximum allowed sequence distance to retain a kmer match (requires --matchKmerSeq; Default: 0)
+                                                 Note: when >= 1, this is interpreted as the absolute number of bases that are allowed to
+                                                       differ between the kmer and the match. When < 1, this is interpreted as a fraction
+                                                       of the kmer's length
+ --matchKmerGCcontent                            The sequence of a query kmer and the corresponding database match must have GC% contents
+                                                 differing no more than --maxKmerGCdiff
+ --maxKmerGCdiff               <float>           Maximum allowed GC% difference to retain a kmer match (requires --matchKmerGCcontent)
+                                                 Note: the default value is automatically determined based on the chosen kmer length
+ --kmerLen                     <int>             Length (in nt) of the kmers (Default: 15)
+ --kmerOffset                  <int>             Sliding offset for extracting candidate kmers from the query (Default: 1)
+ --kmerMinComplexity           <float>           Minimum complexity (measured as Gini coefficient) of candidate kmers (Default: 0.3)
+ --kmerMaxMatchEveryNt         <int>             A kmer is allowed to match a database entry on average every this many nt (Default: 200)
+
+HELP
+
+}
