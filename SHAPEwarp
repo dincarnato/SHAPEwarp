@@ -270,7 +270,7 @@ while(!$queryIO->eof()) {
     $progressBar->reset();
     $progressBar->init("Kmer lookup query \"" . $queryId . "\"");
 
-    $ret = `$kmerLookupCmd --db ${dbFolder}reactivity.db --output ${output}tmp/$queryId.kmers`;print $ret;
+    $ret = `$kmerLookupCmd --db ${dbFolder}reactivity.db --output ${output}tmp/$queryId.kmers`;
 
     $progressBar->update(1);
     print "\n";
