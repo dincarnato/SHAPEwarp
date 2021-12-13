@@ -4,7 +4,7 @@
 
 The model-guided search for structurally-homologous RNAs is a non-trivial task, as it largely depends on the quality of the inferred structure model. When it comes to inferring RNA structures from chemical probing data, the challenges are numerous. Use of different chemical probes, or of different approaches for incorporating experimental reactivities as pseudo-free energy contributions can significantly affect the reliability of the inferred RNA structure model.
 
-__SHAPEwarp__ is a sequence-agnostic method for the identification of structurally-homologous RNA elements in a database of chemical probing-derived reactivity profiles. The approach used by SHAPEwarp is inspired by the BLAST algorithm and builds on top of two widely used methods for similarity search in time series data: Mueen's Algorithm for Similarity Search ([MASS](https://www.cs.unm.edu/~mueen/FastestSimilaritySearch.html)) and dynamic time warping (DTW). 
+__SHAPEwarp__ is a sequence-agnostic method for the identification of structurally-similar RNA elements in a database of chemical probing-derived reactivity profiles. The approach used by SHAPEwarp is inspired by the BLAST algorithm and builds on top of two widely used methods for similarity search in time series data: Mueen's Algorithm for Similarity Search ([MASS](https://www.cs.unm.edu/~mueen/FastestSimilaritySearch.html)) and dynamic time warping (DTW). 
 
 For support requests, please post your questions to: <https://github.com/dincarnato/SHAPEwarp/issues>
 
@@ -19,7 +19,7 @@ Danny Incarnato (dincarnato[at]rnaframework.com)<br/>
 
 ## Reference
 
-Morandi *et al*., submitted. SHAPE-guided RNA structure homology search and motif discovery.
+Morandi *et al*., submitted. SHAPE-guided RNA structure similarity search and motif discovery.
 
 ## License
 
