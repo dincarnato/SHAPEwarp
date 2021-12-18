@@ -38,23 +38,24 @@ do {
 
     local $SIG{__WARN__} = sub { };
 
-    GetOptions( "o|output=s"     => \$output,
+    GetOptions( "h|help"         => \$help,
+                "o|output=s"     => \$output,
                 "ow|overwrite"   => \$overwrite,
-                "threads=i"      => \$threads,
-                "blockSize=i"    => \$blockSize,
+                "threads=s"      => \$threads,
+                "blockSize=s"    => \$blockSize,
                 "inBlockShuffle" => \$inBlockShuffle,
-                "chunkSize=i"    => \$chunkSize,
-                "shufflings=i"   => \$nShufflings,
+                "chunkSize=s"    => \$chunkSize,
+                "shufflings=s"   => \$nShufflings,
                 "foldDb"         => \$foldDb,
-                "maxBPspan=i"    => \$maxBPspan,
+                "maxBPspan=s"    => \$maxBPspan,
                 "noLonelyPairs"  => \$noLonelyPairs,
                 "noClosingGU"    => \$noClosingGU,
                 "slope=s"        => \$slope,
                 "intercept=s"    => \$intercept,
                 "temperature=s"  => \$temperature,
-                "winSize=i"      => \$foldWin,
-                "offset=i"       => \$foldOffset,
-                "winTrim=i"      => \$winTrim ) or help(1);
+                "winSize=s"      => \$foldWin,
+                "offset=s"       => \$foldOffset,
+                "winTrim=s"      => \$winTrim ) or help(1);
 
     @inputXml = @ARGV;
 
@@ -77,6 +78,7 @@ $winTrim //= 50;
 $output =~ s/\/?$/\//;
 @offset = (0, 0);
 
+die "\n[!] Error: Number of threads must be a positive INT > 0\n\n" if (!isint($threads));
 die "\n[!] Error: Block size must be a positive INT > 0\n\n" if (!isint($blockSize) || $blockSize <= 0);
 die "\n[!] Error: Chunk size must be a positive INT >= 100\n\n" if (!isint($chunkSize) || $chunkSize < 100);
 die "\n[!] Error: Slope must be numeric\n\n" if (!isnumeric($slope));
@@ -336,18 +338,18 @@ sub help {
                                                        longer queries, then it is advisable to increase the value of chunkSize
  --shufflings                  <int>             Number of shufflings to perform for each database entry (Default: 100)
  --foldDb                                        Provided SHAPE profiles are first used to calculate base-pairing probability profiles,
-                                                 that are then used to generate the db
+                                                 that are then used to generate the database
                                                  Note: query searches must be performed with the '--foldQuery' option of SHAPEwarp
 
  |
- +- Probability profile db construction options
+ +- Probability profile database construction options
 
     --maxBPspan                   <int>             Maximum allowed base-pairing distance (Default: 600)
     --noLonelyPairs                                 Disallows lonely pairs (helices of 1 bp)
     --noClosingGU                                   Dissalows G:U wobbles at the end of helices
     --slope                       <float>           Slope for SHAPE reactivities conversion into pseudo-free energy contributions (Default: 1.8)
     --intercept                   <float>           Intercept for SHAPE reactivities conversion into pseudo-free energy contributions (Default: -0.6)
-    --temperature                 <float>           Folding temperature (Default: 37)
+    --temperature                 <float>           Folding temperature (Default: 37.0)
     --winSize                     <int>             Size (in nt) of the sliding window for partition function calculation (Default: 800)
     --offset                      <int>             Offset (in nt) for partition function window sliding (Default: 200)
     --winTrim                     <int>             Number of bases to trim from both ends of partition function windows to avoid terminal

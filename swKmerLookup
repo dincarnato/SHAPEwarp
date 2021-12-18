@@ -25,18 +25,18 @@ do {
                 "db=s"                  => \$db,
                 "react=s"               => \$reactivity,
                 "seq=s"                 => \$sequence,
-                "threads=i"             => \$threads,
-                "minKmers=i"            => \$minKmers,
+                "threads=s"             => \$threads,
+                "minKmers=s"            => \$minKmers,
                 "maxReactivity=s"       => \$maxReactivity,
-                "maxKmerDist=i"         => \$maxKmerDist,
+                "maxKmerDist=s"         => \$maxKmerDist,
                 "matchKmerSeq"          => \$matchKmerSeq,
                 "kmerMaxSeqDist=s"      => \$kmerMaxSeqDist,
                 "matchKmerGCcontent"    => \$matchKmerGCcontent,
                 "maxKmerGCdiff=s"       => \$maxKmerGCdiff,
-                "kmerLen=i"             => \$kmerLen,
-                "kmerOffset=i"          => \$kmerOffset,
+                "kmerLen=s"             => \$kmerLen,
+                "kmerOffset=s"          => \$kmerOffset,
                 "kmerMinComplexity=s"   => \$kmerMinComplexity,
-                "kmerMaxMatchEveryNt=i" => \$kmerMaxMatchEveryNt,
+                "kmerMaxMatchEveryNt=s" => \$kmerMaxMatchEveryNt,
                 "debug"                 => \$debug ) or help(1);
 
 };
@@ -58,6 +58,7 @@ $reactivity = [ split ",", $reactivity ];
 die "\n[!] Error: Specified database file does not exist\n\n" if (!-e $db);
 die "\n[!] Error: No query provided\n\n" if (!@{$reactivity});
 die "\n[!] Error: Different lengths for query reactivity profile and sequence\n\n" if (defined $sequence && length($sequence) != @{$reactivity});
+die "\n[!] Error: Number of threads must be a positive INT > 0\n\n" if (!isint($threads));
 die "\n[!] Error: Minimum number of kmers must be an INT > 0\n\n" if (!isint($minKmers) || $minKmers <= 0);
 die "\n[!] Error: Maximum kmer distance must be a positive INT\n\n" if (!isint($maxKmerDist) || !ispositive($maxKmerDist));
 die "\n[!] Error: Kmer length must be a positive INT >= 6\n\n" if (!isint($kmerLen) || $kmerLen < 6);

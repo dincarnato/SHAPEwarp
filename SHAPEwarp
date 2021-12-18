@@ -58,30 +58,31 @@ do {
 
     local $SIG{__WARN__} = sub { };
 
-    GetOptions( "o|output=s"              => \$output,
+    GetOptions( "h|help"                  => \$help,
+                "o|output=s"              => \$output,
                 "ow|overwrite"            => \$overwrite,
                 "db|database=s"           => \$dbFolder,
                 "q|query=s"               => \$queryFile,
-                "threads=i"               => \$threads,
+                "threads=s"               => \$threads,
                 "makePlot"                => \$makePlot,
                 "reportAln=s"             => \$reportAln,
-                "minKmers=i"              => \$minKmers,
-                "maxKmerDist=i"           => \$maxKmerDist,
+                "minKmers=s"              => \$minKmers,
+                "maxKmerDist=s"           => \$maxKmerDist,
                 "matchKmerSeq"            => \$matchKmerSeq,
                 "kmerMaxSeqDist=s"        => \$kmerMaxSeqDist,
                 "matchKmerGCcontent"      => \$matchKmerGCcontent,
                 "maxKmerGCdiff=s"         => \$maxKmerGCdiff,
-                "kmerLen=i"               => \$kmerLen,
-                "kmerOffset=i"            => \$kmerOffset,
+                "kmerLen=s"               => \$kmerLen,
+                "kmerOffset=s"            => \$kmerOffset,
                 "kmerMinComplexity=s"     => \$kmerMinComplexity,
-                "kmerMaxMatchEveryNt=i"   => \$kmerMaxMatchEveryNt,
-                "nullKmers=i"             => \$nullKmers,
+                "kmerMaxMatchEveryNt=s"   => \$kmerMaxMatchEveryNt,
+                "nullHSGs=s"              => \$nullKmers,
                 "alignMatchScore=s"       => \$alignMatchScore,
                 "alignMismatchScore=s"    => \$alignMismatchScore,
                 "alignGapOpenPenal=s"     => \$alignGapOpenPenal,
                 "alignGapExtPenal=s"      => \$alignGapExtPenal,
                 "alignMaxDropOffRate=s"   => \$alignMaxDropOffRate,
-                "alignMaxDropOffBases=i"  => \$alignMaxDropOffBases,
+                "alignMaxDropOffBases=s"  => \$alignMaxDropOffBases,
                 "alignLenTolerance=s"     => \$alignLenTolerance,
                 "alignScoreSeq"           => \$alignScoreSeq,
                 "alignSeqMatchScore=s"    => \$alignSeqMatchScore,
@@ -92,23 +93,24 @@ do {
                 "ignoreReact"             => \$ignoreReact,
                 "slope=s"                 => \$slope,
                 "intercept=s"             => \$intercept,
-                "maxBPspan=i"             => \$maxBPspan,
+                "maxBPspan=s"             => \$maxBPspan,
                 "noLonelyPairs"           => \$noLonelyPairs,
                 "noClosingGU"             => \$noClosingGU,
                 "temperature"             => \$temperature,
-                "winSize=i"               => \$foldWin,
-                "offset=i"                => \$foldOffset,
-                "winTrim=i"               => \$winTrim,
+                "winSize=s"               => \$foldWin,
+                "offset=s"                => \$foldOffset,
+                "winTrim=s"               => \$winTrim,
                 "evalAlignFold"           => \$evalAlignFold,
                 "repE|reportEvalue=s"     => \$reportEvalue,
                 "incE|inclusionEvalue=s"  => \$inclusionEvalue,
                 "alignFoldPvalue=s"       => \$alignFoldPvalue,
                 "minBpSupport=s"          => \$minBpSupport,
                 "ribosumScoring"          => \$ribosumScoring,
-                "blockSize=i"             => \$blockSize,
+                "blockSize=s"             => \$blockSize,
                 "inBlockShuffle"          => \$inBlockShuffle,
                 "tblOut"                  => \$tblOut,
-                "RNAalifold=s"            => \$pathToAlifold ) or help(1);
+                "RNAalifold=s"            => \$pathToAlifold,
+                "shufflings=s"            => \$nAliShufflings ) or help(1);
 
 };
 
@@ -157,6 +159,7 @@ $alignMismatchScore = [ sort { $a <=> $b } split(",", $alignMismatchScore) ];
 $progressBar = shareDataStruct(Term::Progress->new( max   => 0,
                                                     width => 50 ));
 
+die "\n[!] Error: Number of threads must be a positive INT > 0\n\n" if (!isint($threads));
 die "\n[!] Error: Database path does not point to a directory\n\n" if (!-d $dbFolder);
 die "\n[!] Error: Database file reactivity.db is missing\n\n" if (!-e $dbFolder . "reactivity.db");
 die "\n[!] Error: Database file reactivity.shuffled.db is missing\n\n" if (!-e $dbFolder . "reactivity.shuffled.db");
@@ -196,6 +199,7 @@ die "\n[!] Error: Inclusion E-value cutoff must be positive\n\n" if (!ispositive
 die "\n[!] Error: Alignment folding p-value cutoff must be comprised between 0 and 1\n\n" if (!inrange($alignFoldPvalue, [0, 1]));
 die "\n[!] Error: Minimum base-pair support must be comprised between 0 and 1\n\n" if (!inrange($minBpSupport, [0, 1]));
 die "\n[!] Error: Block size must be a positive INT > 0\n\n" if (!isint($blockSize) || $blockSize <= 0);
+die "\n[!] Error: Number of shufflings must be a positive INT > 0\n\n" if (!isint($nAliShufflings) || $nAliShufflings <= 0);
 die "\n[!] Error: RNAalifold is not in PATH\n\n" if ($evalAlignFold && !defined $pathToAlifold);
 die "\n[!] Error: Provided path to RNAalifold does not point to an executable\n\n" if ($evalAlignFold && (!-e $pathToAlifold || !-x $pathToAlifold || !-f $pathToAlifold));
 
@@ -456,7 +460,7 @@ if (@finalMatches) {
 
     my ($resultTable, @head, @inc, @rep);
     $resultTable = Term::Table->new();
-    @head = ("Query", "DB entry", "Qstart", "Qend", "Dstart", "Dend", "Qseed", "Dseed", "Score", "P-value", "E-value");
+    @head = ("Query", "DB", "Qstart", "Qend", "Dstart", "Dend", "Qseed", "Dseed", "Score", "P-value", "E-value");
     push(@head, "Alifold p-value", "Dbpsupport", "Qbpsupport") if ($evalAlignFold);
     $resultTable->head(@head, "");
 
@@ -856,14 +860,14 @@ sub help {
  -db or --database             <string>          Path to a database folder generated with swBuildDb
  -q  or --query                <string>          Path to the query file
                                                  Note: each entry should contain (one per row) the sequence id, the nucleotide sequence and
-                                                       a comma-separated list of SHAPE reactivities, one per
+                                                       a comma-separated list of SHAPE reactivities
  -o  or --output               <string>          Output directory (Default: sw_out/)
  -ow or --overwrite                              Overwrites the output directory (if the specified path already exists)
  --threads                     <int>             Number of processors to use (Default: 1)
  --maxReactivity               <float>           Maximum value to which reactivities will be capped (Default: 1)
  --maxAlignOverlap             <float>           If two significant alignments overlap by more than this value, the least significant one
                                                  (the one with the lowest alignment score) will be discarded (Default: 0.5)
- --nullKmers                   <int>             Number of kmer matches to be extended to build the null model (Default: 10000)
+ --nullHSGs                   <int>              Number of HSGs in the shuffled database to be extended to build the null model (Default: 10000)
  --incE or --inclusionEvalue   <float>           E-value threshold to consider an alignment significant (Default: 0.01)
  --repE or --reportEvalue      <float>           E-value threashold to report a match (Default: 0.1)
  --makePlot                                      Generates plots of aligned SHAPE reactivity (or probability) profiles
@@ -882,7 +886,7 @@ sub help {
     --maxBPspan                <int>             Maximum allowed base-pairing distance (Default: 600)
     --noLonelyPairs                              Disallows lonely pairs (helices of 1 bp)
     --noClosingGU                                Dissalows G:U wobbles at the end of helices
-    --temperature              <float>           Folding temperature (Default: 37)
+    --temperature              <float>           Folding temperature (Default: 37.0)
 
     |
     +- Query folding-specific options (require --foldQuery)
@@ -924,7 +928,7 @@ sub help {
                                                  before extension is interrupted (Default: 0.8)
     --alignMaxDropOffBases     <int>             An alignment is allowed to drop below the best score encountered so far * --alignMaxDropOffRate
                                                  by this number of bases, before extension is interrupted (Default: 8)
-    --alignLenTolerance       <float>           The maximum allowed tollerated length difference between the query and db sequences to look for
+    --alignLenTolerance       <float>            The maximum allowed tollerated length difference between the query and db sequences to look for
                                                  the ideal alignment along the diagonal (measured as a fraction of the length of the shortest
                                                  sequence between the db and the query) (Default: 0.1)
                                                  Note: a minimum band size of 10 nt is always granted to perform the banded alignment
@@ -937,6 +941,7 @@ sub help {
 
     --evalAlignFold                              Alignments passing the --inclusionEvalue threshold, are further evaluated for the presence of
                                                  a conserved RNA structure by using RNAalifold
+    --shufflings                       <int>     Number of shufflings to perform for each alignment (Default: 100)
     --blockSize                        <int>     Size (in nt) of the blocks for shuffling the alignment (Default: 3)
     --inBlockShuffle                             Besides shuffling blocks, residues within each block will be shuffled as well
     --minBpSupport                     <float>   Minimum fraction of base-pairs of the RNAalifold-inferred structure that should be supported
