@@ -635,6 +635,10 @@ impl Mass {
     ) -> Result<Vec<Complex<f64>>, fftw::error::Error> {
         let ts_len = db_transform.len();
         let query_len = query.len();
+        let result_range = query_len - 1..ts_len;
+        if result_range.is_empty() {
+            return Ok(Vec::new());
+        }
 
         query
             .iter()
@@ -664,7 +668,7 @@ impl Mass {
         let (mean_y, sigma_y) = mean_stddev(query, 0);
 
         let query_len_f64 = query_len as f64;
-        Ok(self.product_inverse[query_len - 1..ts_len]
+        Ok(self.product_inverse[result_range]
             .iter()
             .zip(mean_sigma_x)
             .map(|(z, (mean_x, sigma_x))| {
