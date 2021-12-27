@@ -45,7 +45,7 @@ my ($help, $output, $overwrite, $dbFolder,
     $ribosumScoring, $blockSize, $inBlockShuffle,
     $minBpSupport, $makePlot, $reportAln, $alignScoreSeq,
     $alignSeqMatchScore, $alignSeqMismatchScore, $slope,
-    $intercept, $matchKmerGCcontent, $maxKmerGCdiff,
+    $intercept, $matchKmerGCcontent, $kmerMaxGCdiff,
     $maxBPspan, $noLonelyPairs, $noClosingGU, $temperature,
     $foldWin, $foldOffset, $winTrim, $pathToAlifold,
     @pool, @finalMatches);
@@ -71,7 +71,7 @@ do {
                 "matchKmerSeq"            => \$matchKmerSeq,
                 "kmerMaxSeqDist=s"        => \$kmerMaxSeqDist,
                 "matchKmerGCcontent"      => \$matchKmerGCcontent,
-                "maxKmerGCdiff=s"         => \$maxKmerGCdiff,
+                "kmerMaxGCdiff=s"         => \$kmerMaxGCdiff,
                 "kmerLen=s"               => \$kmerLen,
                 "kmerOffset=s"            => \$kmerOffset,
                 "kmerMinComplexity=s"     => \$kmerMinComplexity,
@@ -169,7 +169,7 @@ die "\n[!] Error: Specified query file does not exist\n\n" if (!-e $queryFile);
 die "\n[!] Error: Minimum number of kmers must be an INT > 0\n\n" if (!isint($minKmers) || $minKmers <= 0);
 die "\n[!] Error: Maximum kmer distance must be a positive INT\n\n" if (!isint($maxKmerDist) || !ispositive($maxKmerDist));
 die "\n[!] Error: Maximum kmer sequence distance must be positive\n\n" if (!ispositive($kmerMaxSeqDist));
-die "\n[!] Error: Maximum kmer GC% difference must be positive\n\n" if (defined $maxKmerGCdiff && !ispositive($maxKmerGCdiff));
+die "\n[!] Error: Maximum kmer GC% difference must be positive\n\n" if (defined $kmerMaxGCdiff && !ispositive($kmerMaxGCdiff));
 die "\n[!] Error: Kmer length must be a positive INT >= 6\n\n" if (!isint($kmerLen) || $kmerLen < 6);
 die "\n[!] Error: Kmer offset must be a positive INT comprised between 1 and kmerLen\n\n" if (!isint($kmerOffset) || $kmerOffset <= 0 || $kmerOffset > $kmerLen);
 die "\n[!] Error: Minimum kmer complexity must be a positive INT\n\n" if (!ispositive($kmerMinComplexity));
@@ -265,7 +265,7 @@ while(!$queryIO->eof()) {
                      " --kmerMinComplexity " . $kmerMinComplexity . " --kmerMaxMatchEveryNt " . $kmerMaxMatchEveryNt;
     $kmerLookupCmd .= " --matchKmerSeq" if ($matchKmerSeq);
     $kmerLookupCmd .= " --matchKmerGCcontent" if ($matchKmerGCcontent);
-    $kmerLookupCmd .= " --maxKmerGCdiff " . $maxKmerGCdiff if (defined $maxKmerGCdiff && $matchKmerGCcontent);
+    $kmerLookupCmd .= " --kmerMaxGCdiff " . $kmerMaxGCdiff if (defined $kmerMaxGCdiff && $matchKmerGCcontent);
 
     $dbIO = SW::DB->new( file  => $dbFolder . "reactivity.db",
                          index => $dbFolder . "reactivity.dbi");
@@ -792,7 +792,7 @@ sub writeParamsOut {
                     "matchKmerSeq=" . ($matchKmerSeq ? "yes" : "no") . "\n" .
                     ($matchKmerSeq ? "kmerMaxSeqDist=$kmerMaxSeqDist\n" : undef) .
                     "matchKmerGCcontent=" . ($matchKmerGCcontent ? "yes" : "no") . "\n" .
-                    ($matchKmerGCcontent && $maxKmerGCdiff ? "maxKmerGCdiff=$maxKmerGCdiff\n" : undef) .
+                    ($matchKmerGCcontent && $kmerMaxGCdiff ? "kmerMaxGCdiff=$kmerMaxGCdiff\n" : undef) .
                     "nullKmers=$nullKmers\n" .
                     "alignMatchScore=" . join(",", @$alignMatchScore) . "\n" .
                     "alignMismatchScore=" . join(",", @$alignMismatchScore) . "\n" .
@@ -870,6 +870,7 @@ sub help {
  --nullHSGs                   <int>              Number of HSGs in the shuffled database to be extended to build the null model (Default: 10000)
  --incE or --inclusionEvalue   <float>           E-value threshold to consider an alignment significant (Default: 0.01)
  --repE or --reportEvalue      <float>           E-value threashold to report a match (Default: 0.1)
+ --tblOut                                        Besides printing the result summary to screen, matches are reported as a TSV file
  --makePlot                                      Generates plots of aligned SHAPE reactivity (or probability) profiles
                                                  Note: plots are generated only for matches below the inclusion E-value cutoff
  --reportAln                   <string>          Reports sequence alignments in the specified format ([f]asta or [s]tockholm)
@@ -905,12 +906,12 @@ sub help {
     --kmerLen                  <int>             Length (in nt) of the kmers (Default: 15)
     --kmerOffset               <int>             Sliding offset for extracting candidate kmers from the query (Default: 1)
     --matchKmerGCcontent                         The sequence of a query kmer and the corresponding database match must have GC% contents
-                                                 differing no more than --maxKmerGCdiff
-    --maxKmerGCdiff            <float>           Maximum allowed GC% difference to retain a kmer match (requires --matchKmerGCcontent)
+                                                 differing no more than --kmerMaxGCdiff
+    --kmerMaxGCdiff            <float>           Maximum allowed GC% difference to retain a kmer match (requires --matchKmerGCcontent)
                                                  Note: the default value is automatically determined based on the chosen kmer length
     --matchKmerSeq                               The sequence of a query kmer and the corresponding database match must differ no more
-                                                 than --maxKmerSeqDist
-    --maxKmerSeqDist           <float>           Maximum allowed sequence distance to retain a kmer match (requires --matchKmerSeq; Default: 0)
+                                                 than --kmerMaxSeqDist
+    --kmerMaxSeqDist           <float>           Maximum allowed sequence distance to retain a kmer match (requires --matchKmerSeq; Default: 0)
                                                  Note: when >= 1, this is interpreted as the absolute number of bases that are allowed to
                                                        differ between the kmer and the matching region. When < 1, this is interpreted as a
                                                        fraction of the kmer's length

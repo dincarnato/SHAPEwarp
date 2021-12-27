@@ -31,7 +31,7 @@ my @query = (
 );
 my $query_sequence = "GATGTGAAATCCCCGGGCTCAACCTGGGAACTGCATCTGATACTGGCAAGCTTGAGTCTCGTAGAGGGGGGTAGAATTCCAGGTGTAGCGGTGAAATGCGTAGAGATCTGGAGGAATACCGGTGGCGAAGGCGGCCCCCTGGACGAAGACTGACGCTCAGGTGCGAAAGCGTGGGGAGCAAACAGGATTAGATACCCTGG";
 
-my $result = $sw->run(File::Spec->catfile(dirname(__FILE__), "test.db"), \@query, $query_sequence);
+my $result = $sw->run(File::Spec->catfile(dirname(__FILE__), "reactivity.db"), \@query, $query_sequence);
 is $result, 286;
 
 done_testing;

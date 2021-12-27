@@ -78,6 +78,8 @@ $winTrim //= 50;
 $output =~ s/\/?$/\//;
 @offset = (0, 0);
 
+die "\n[!] Error: No input XML folder provided\n\n" if (!@inputXml);
+for (@inputXml) { die "\n[!] Error: Specified path \"" . $_ . "\" does not point to a directory\n\n" if (!-d $_); }
 die "\n[!] Error: Number of threads must be a positive INT > 0\n\n" if (!isint($threads));
 die "\n[!] Error: Block size must be a positive INT > 0\n\n" if (!isint($blockSize) || $blockSize <= 0);
 die "\n[!] Error: Chunk size must be a positive INT >= 100\n\n" if (!isint($chunkSize) || $chunkSize < 100);

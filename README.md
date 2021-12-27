@@ -58,3 +58,21 @@ SHAPEwarp builds on top of RNA Framework. To use SHAPEwarp, you must add the RNA
 ```bash
 export PERL5LIB=$PERL5LIB:/path/to/RNAFramework/lib
 ```
+
+
+## Testing your SHAPEwarp installation
+
+To test if SHAPEwarp is properly working, from within the SHAPEwarp install directory issue the following command:
+
+```bash
+./SHAPEwarp -q t/query.txt -d t/ -o test_out -ow
+```
+The expected output should look like the following:
+
+```bash
+Query   DB             Qstart  Qend  Dstart  Dend   Qseed    Dseed      Score    P-value    E-value
+
+test    16S_Bsubtilis  7       170   916     1079   16-100   925-1009   173.76   4.83e-08   7.63e-06   !
+
+test    16S_Bsubtilis  1       170   128     297    79-100   206-227    86.50    5.01e-04   0.08       ?
+```
