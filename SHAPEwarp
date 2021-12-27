@@ -524,7 +524,7 @@ sub reportStockholmAln {
     $maxLen = max(length($aln->dbId()), length($aln->queryId()), 12) + 4; # 4 is the actual spacing
     $io->write("# STOCKHOLM 1.0\n" .
                "#=GF ID " . $id . "\n" .
-               "#=GF AU SHAPEwarp " . $Core::Utils::VERSION . "\n\n" .
+               "#=GF AU SHAPEwarp 1.0.0a\n\n" .
                $aln->dbId() . (" " x ($maxLen - length($aln->dbId()))) . $aln->dbSeq() . "\n" .
                $aln->queryId() . (" " x ($maxLen - length($aln->queryId()))) . $aln->querySeq() . "\n");
     $io->write("#=GC SS_cons" . (" " x ($maxLen - 12)) . $aln->structure() . "\n") if ($evalAlignFold);
