@@ -1,9 +1,25 @@
 ![SHAPEwarp logo](http://www.incarnatolab.com/images/software/SHAPEwarp.png)
 <br />
+## Introduction
+
+The model-guided search for structurally-homologous RNAs is a non-trivial task, as it largely depends on the quality of the inferred structure model. When it comes to inferring RNA structures from chemical probing data, the challenges are numerous. Use of different chemical probes, or of different approaches for incorporating experimental reactivities as pseudo-free energy contributions can significantly affect the reliability of the inferred RNA structure model.
+
+__SHAPEwarp__ is a sequence-agnostic method for the identification of structurally-similar RNA elements in a database of chemical probing-derived reactivity profiles. The approach used by SHAPEwarp is inspired by the BLAST algorithm and builds on top of two widely used methods for similarity search in time series data: Mueen's Algorithm for Similarity Search ([MASS](https://www.cs.unm.edu/~mueen/FastestSimilaritySearch.html)) and dynamic time warping (DTW). 
+
+For support requests, please post your questions to: <https://github.com/dincarnato/SHAPEwarp/issues>
+
+For a complete documentation, please refer to: <https://shapewarp-docs.readthedocs.io/en/latest/>
+
+
 ## Author(s)
 
 Edoardo Morandi (emorandi[at]rnaframework.com)<br/>
 Danny Incarnato (dincarnato[at]rnaframework.com)<br/>
+
+
+## Reference
+
+Morandi *et al*., submitted. SHAPE-guided RNA structure homology search and motif discovery.
 
 
 ## License
@@ -30,7 +46,7 @@ Clone the SHAPEwarp git repository:
 git clone https://github.com/dincarnato/SHAPEwarp
 ```
 This will create a "SHAPEwarp" folder.<br/>
-To compile the modules needed for kmer lookup:
+To compile the modules needed for kmer lookup issue:
 
 ```bash
 cd SHAPEwarp
@@ -38,21 +54,32 @@ perl Makefile.PL
 make
 make test
 ```
-SHAPEwarp builds on top of RNA Framework. To use SHAPEwarp, you must add the RNA Framework's ``lib/`` folder to your ``PERL5LIB`` environment variable:
+If the installation went fine, the expected output of the ``make test`` command should look like the following:
+
+```bash
+"/usr/bin/perl" -MFFI::Build::MM=cmd -e fbx_build
+"/usr/bin/perl" -MFFI::Build::MM=cmd -e fbx_test
+PERL_DL_NONLAZY=1 "/usr/bin/perl" "-MExtUtils::Command::MM" "-MTest::Harness" "-e" "undef *Test::Harness::Switches; test_harness(0, 'blib/lib', 'blib/arch')" t/*.t
+t/basic.t .. ok
+All tests successful.
+Files=1, Tests=1,  1 wallclock secs ( 0.03 usr  0.00 sys +  0.54 cusr  0.04 csys =  0.61 CPU)
+Result: PASS
+```
+SHAPEwarp builds on top of the [RNA Framework](https://github.com/dincarnato/RNAFramework/). To use SHAPEwarp, the ``lib/`` folder of the RNA Framework must be added to the ``PERL5LIB`` environment variable:
 
 ```bash
 export PERL5LIB=$PERL5LIB:/path/to/RNAFramework/lib
 ```
 
 
-## Testing your SHAPEwarp installation
+## Testing the SHAPEwarp installation
 
-To test if SHAPEwarp is properly working, from within the SHAPEwarp install directory issue the following command:
+To test SHAPEwarp on a small test dataset, issue the following command from within the SHAPEwarp install directory:
 
 ```bash
 ./SHAPEwarp -q t/query.txt -d t/ -o test_out -ow
 ```
-The expected output should look like the following:
+The search will take &lt;1 minute and the expected output should look like the following:
 
 ```bash
 Query   DB             Qstart  Qend  Dstart  Dend   Qseed    Dseed      Score    P-value    E-value
