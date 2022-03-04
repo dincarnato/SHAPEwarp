@@ -387,8 +387,8 @@ while(!$queryIO->eof()) {
                                              slope          => $slope,
                                              intercept      => $intercept,
                                              ribosumScoring => $ribosumScoring,
-					     maxBPspan      => $maxBPspan,
-					     noLonelyPairs  => $noLonelyPairs });
+					                         maxBPspan      => $maxBPspan,
+					                         noLonelyPairs  => $noLonelyPairs });
 
                 ($dbBpSupport, $queryBpSupport) = calcBpSupport($match->dbSeq(), $match->querySeq(), $aln->structure());
 
@@ -643,7 +643,7 @@ sub align {
                                    mismatch        => $alignMismatchScore,
                                    gapOpen         => $alignGapOpenPenal,
                                    gapExt          => $alignGapExtPenal,
-                                   lenTolerance   => $alignLenTolerance,
+                                   lenTolerance    => $alignLenTolerance,
                                    maxDropOffRate  => $alignMaxDropOffRate,
                                    maxDropOffBases => $alignMaxDropOffBases );
         $aln = $aligner->align();
@@ -721,8 +721,8 @@ sub shuffleAlifold {
     $aln = $interface->alifold($alignment, { reactivity     => $reactivity,
                                              slope          => $slope,
                                              intercept      => $intercept,
-					     maxBPspan      => $maxBPspan,
-					     noLonelyPairs  => $noLonelyPairs,
+					                         maxBPspan      => $maxBPspan,
+					                         noLonelyPairs  => $noLonelyPairs,
                                              ribosumScoring => $ribosumScoring });
 
     return($aln->energy());

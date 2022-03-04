@@ -11,16 +11,6 @@ use base qw(Data::IO);
 use constant EOF => "\x5b\x65\x6f\x66\x64\x62\x5d";
 use constant VERSION => 1;
 
-our (%bases);
-
-BEGIN {
-
-    my $i = 5;
-    %bases = map { --$i => $_,
-                   $_   => $i } qw(N T G C A);
-
-}
-
 sub new {
 
     my $class = shift;
@@ -220,15 +210,10 @@ sub read {
     read($fh, $data, 4);
     $length = unpack("L<", $data);
 
-    for (0 .. ($length + ($length % 2)) / 2 - 1) {
-
-        read($fh, $data, 1);
-
-        foreach my $i (1, 0) { $sequence .= $bases{vec($data, $i, 4)}; }
-
-    }
-
-    $sequence = substr($sequence, 0, $length);
+    read($fh, $data, ($length + ($length % 2)) / 2);
+    $data = unpack("H*", $data);
+    $data =~ tr/43210/NTGCA/;
+    $sequence = substr($data, 0, $length);
 
     read($fh, $data, 8 * $length);
     @reactivity = unpack("d*", $data);
@@ -265,7 +250,8 @@ sub write {
 
         my ($id, $seq, $length, @reactivity);
         $id = $entry->id();
-        $seq = join("", map{sprintf("%x", $bases{$_})} split(//, $entry->sequence()));
+        $seq = $entry->sequence;
+        $seq =~ tr/NTGCA/43210/;
         $length = length($seq);
         @reactivity = map { isnan($_) ? -999 : $_ } $entry->reactivity();
 
