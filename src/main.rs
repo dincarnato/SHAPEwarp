@@ -1,5 +1,6 @@
 mod cli;
 mod db_file;
+mod query_file;
 
 use clap::Parser;
 use std::ops::Range;
@@ -48,6 +49,21 @@ impl Base {
             Self::T => b'T',
             Self::N => b'N',
         }
+    }
+}
+
+impl TryFrom<u8> for Base {
+    type Error = InvalidEncodedBase;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        Ok(match value {
+            b'A' => Self::A,
+            b'C' => Self::C,
+            b'G' => Self::G,
+            b'T' => Self::T,
+            b'N' => Self::N,
+            _ => return Err(InvalidEncodedBase),
+        })
     }
 }
 
