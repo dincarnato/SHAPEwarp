@@ -1,4 +1,5 @@
 mod cli;
+mod db_file;
 
 use clap::Parser;
 use std::ops::Range;
@@ -9,6 +10,49 @@ fn main() {
     let cli = Cli::parse();
     dbg!(cli);
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Base {
+    A,
+    C,
+    G,
+    T,
+    N,
+}
+
+impl Base {
+    fn try_from_nibble(nibble: u8) -> Result<Self, InvalidEncodedBase> {
+        use Base::*;
+        Ok(match nibble {
+            0 => A,
+            1 => C,
+            2 => G,
+            3 => T,
+            4 => N,
+            _ => return Err(InvalidEncodedBase),
+        })
+    }
+
+    fn try_pair_from_byte(byte: u8) -> Result<[Self; 2], InvalidEncodedBase> {
+        let first = Base::try_from_nibble(byte >> 4)?;
+        let second = Base::try_from_nibble(byte & 0x0F)?;
+
+        Ok([first, second])
+    }
+
+    fn to_byte(self) -> u8 {
+        match self {
+            Self::A => b'A',
+            Self::C => b'C',
+            Self::G => b'G',
+            Self::T => b'T',
+            Self::N => b'N',
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct InvalidEncodedBase;
 
 struct Scores {
     align_match: Range<f32>,
@@ -67,9 +111,6 @@ fn calc_base_alignment_score(query: f32, target: f32, scores: &Scores, max_react
         }
     }
 }
-
-// TODO: use an appropriate type
-type Base = u8;
 
 #[inline]
 fn get_sequence_base_alignment_score(query: Base, target: Base, scores: &SequenceScores) -> f32 {
