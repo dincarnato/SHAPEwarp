@@ -7,13 +7,17 @@ use std::ops::Range;
 
 use crate::cli::Cli;
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     let cli = Cli::parse();
-    dbg!(cli);
+    let query = query_file::read_file(&cli.query, cli.max_reactivity)?;
+    let db = db_file::read_file(&cli.database)?;
+    dbg!(query, db);
+
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Base {
+pub(crate) enum Base {
     A,
     C,
     G,

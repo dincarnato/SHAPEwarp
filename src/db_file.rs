@@ -1,7 +1,9 @@
 use std::{
     convert::TryInto,
     ffi::CString,
-    io::{self, Read, Seek, SeekFrom},
+    fs::File,
+    io::{self, BufReader, Read, Seek, SeekFrom},
+    path::Path,
 };
 
 use itertools::Itertools;
@@ -14,8 +16,8 @@ const END_MARKER: &[u8] = b"[eofdb]";
 #[derive(Debug)]
 pub struct Reader<R> {
     reader: R,
-    db_len: u64,
-    version: u16,
+    _db_len: u64,
+    _version: u16,
     end_offset: u64,
 }
 
@@ -34,12 +36,12 @@ where
             return Err(ReaderError::InvalidMarker.into());
         }
 
-        let db_len = u64::from_le_bytes(end_buf[0..8].try_into().unwrap());
-        let version = u16::from_le_bytes(end_buf[8..10].try_into().unwrap());
+        let _db_len = u64::from_le_bytes(end_buf[0..8].try_into().unwrap());
+        let _version = u16::from_le_bytes(end_buf[8..10].try_into().unwrap());
         Ok(Self {
             reader,
-            db_len,
-            version,
+            _db_len,
+            _version,
             end_offset,
         })
     }
@@ -69,7 +71,7 @@ pub struct EntryIter<'a, R> {
 #[derive(Debug)]
 pub struct Entry {
     pub id: CString,
-    pub sequence: Vec<u8>,
+    pub(crate) sequence: Vec<Base>,
     pub reactivity: Vec<f64>,
 }
 
@@ -123,7 +125,7 @@ where
             .map(
                 |result| result.map_err(EntryIoError::from).and_then(|byte| {
                     Base::try_pair_from_byte(byte)
-                        .map(|[first, second]| [first.to_byte(), second.to_byte()])
+                        .map(|[first, second]| [first, second])
                         .map_err(|_| EntryError::InvalidBase.into())
                 })
             )
@@ -186,9 +188,6 @@ pub enum EntryIoError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum EntryError {
-    #[error("Invalid sequence ID, incoherent length")]
-    InvalidSequenceIdLength,
-
     #[error("Invalid sequence ID string")]
     InvalidSequenceId,
 
@@ -209,6 +208,24 @@ pub enum Error {
 
     #[error("DB reader error: {0}")]
     Reader(#[from] ReaderError),
+
+    #[error("Entry error: {0}")]
+    Entry(#[from] EntryError),
+}
+
+impl From<EntryIoError> for Error {
+    fn from(error: EntryIoError) -> Self {
+        match error {
+            EntryIoError::Io(e) => Error::Io(e),
+            EntryIoError::Entry(e) => Error::Entry(e),
+        }
+    }
+}
+
+pub fn read_file(path: &Path) -> Result<Vec<Entry>, Error> {
+    let mut reader = Reader::new(BufReader::new(File::open(path)?))?;
+    let entries = reader.entries().collect::<Result<_, _>>()?;
+    Ok(entries)
 }
 
 #[cfg(test)]
@@ -222,8 +239,8 @@ mod tests {
     #[test]
     fn valid_reader() {
         let reader = Reader::new(Cursor::new(TEST_DB)).unwrap();
-        assert_eq!(reader.db_len, 0x1181);
-        assert_eq!(reader.version, 1);
+        assert_eq!(reader._db_len, 0x1181);
+        assert_eq!(reader._version, 1);
     }
 
     #[test]
@@ -234,6 +251,6 @@ mod tests {
             .map_ok(|entry| entry.sequence.len())
             .try_fold(0, |acc, seq_len| seq_len.map(|seq_len| acc + seq_len))
             .unwrap();
-        assert_eq!(db_len, reader.db_len.try_into().unwrap());
+        assert_eq!(db_len, reader._db_len.try_into().unwrap());
     }
 }
