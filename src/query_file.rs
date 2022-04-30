@@ -57,12 +57,12 @@ pub struct UnmatchedLengths {
 }
 
 #[inline]
-pub fn read_file(path: &Path) -> Result<Vec<Entry>, Error> {
+pub fn read_file(path: &Path, max_reactivity: f32) -> Result<Vec<Entry>, Error> {
     let reader = BufReader::new(File::open(path).map_err(Box::new)?);
-    read_file_content(reader)
+    read_file_content(reader, max_reactivity)
 }
 
-fn read_file_content<R>(mut reader: R) -> Result<Vec<Entry>, Error>
+fn read_file_content<R>(mut reader: R, max_reactivity: f32) -> Result<Vec<Entry>, Error>
 where
     R: BufRead,
 {
@@ -128,12 +128,15 @@ where
                 let reactivity = if raw_reactivity.eq_ignore_ascii_case("NaN") {
                     f32::NAN
                 } else {
-                    raw_reactivity.parse().map_err(|_| {
-                        Error::InvalidReactivity(Box::new(RowColumn {
-                            row: file_row,
-                            column,
-                        }))
-                    })?
+                    raw_reactivity
+                        .parse::<f32>()
+                        .map_err(|_| {
+                            Error::InvalidReactivity(Box::new(RowColumn {
+                                row: file_row,
+                                column,
+                            }))
+                        })?
+                        .min(max_reactivity)
                 };
 
                 column += raw_reactivity.len();
@@ -201,20 +204,45 @@ mod tests {
         };
     }
 
+    fn reactivities_eq<I1, I2>(a: I1, b: I2) -> bool
+    where
+        I1: IntoIterator<Item = f32>,
+        I2: IntoIterator<Item = f32>,
+    {
+        a.into_iter().zip(b).all(|(a, b)| {
+            if b.is_nan() {
+                a.is_nan()
+            } else {
+                (a - b).abs() < 10e-5
+            }
+        })
+    }
+
     #[test]
     fn read_valid_file() {
         const CONTENT: &str = include_str!("../test_data/valid_query.txt");
-        let entries = read_file_content(Cursor::new(CONTENT)).unwrap();
+        let entries = read_file_content(Cursor::new(CONTENT), 1.).unwrap();
 
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].name, "test1");
         assert_eq!(entries[0].sequence, seq!(A C G T N));
+        assert!(reactivities_eq(
+            entries[0].reactivities.iter().copied(),
+            [0.123, 0.456, 0.789, 1., f32::NAN]
+        ));
+
+        assert_eq!(entries[1].name, "test2");
+        assert_eq!(entries[1].sequence, seq!(N A C G T));
+        assert!(reactivities_eq(
+            entries[1].reactivities.iter().copied(),
+            [f32::NAN, 1., 0.456, 0.789, 0.012]
+        ));
     }
 
     #[test]
     fn empty_sequence() {
         const CONTENT: &str = include_str!("../test_data/query_empty_sequence.txt");
-        let err = read_file_content(Cursor::new(CONTENT)).unwrap_err();
+        let err = read_file_content(Cursor::new(CONTENT), 1.).unwrap_err();
 
         assert!(matches!(err, Error::EmptySequence(6)));
     }
@@ -222,7 +250,7 @@ mod tests {
     #[test]
     fn truncated_sequence() {
         const CONTENT: &str = include_str!("../test_data/query_truncated_sequence.txt");
-        let err = read_file_content(Cursor::new(CONTENT)).unwrap_err();
+        let err = read_file_content(Cursor::new(CONTENT), 1.).unwrap_err();
 
         assert!(matches!(err, Error::TruncatedExpectedSequence));
     }
@@ -230,7 +258,7 @@ mod tests {
     #[test]
     fn truncated_reactivities() {
         const CONTENT: &str = include_str!("../test_data/query_truncated_reactivities.txt");
-        let err = read_file_content(Cursor::new(CONTENT)).unwrap_err();
+        let err = read_file_content(Cursor::new(CONTENT), 1.).unwrap_err();
 
         assert!(matches!(err, Error::TruncatedExpectedReactivities));
     }
@@ -238,7 +266,7 @@ mod tests {
     #[test]
     fn invalid_sequence_base() {
         const CONTENT: &str = include_str!("../test_data/query_invalid_base.txt");
-        let err = read_file_content(Cursor::new(CONTENT)).unwrap_err();
+        let err = read_file_content(Cursor::new(CONTENT), 1.).unwrap_err();
 
         match err {
             Error::InvalidSequenceBase(err) => assert_eq!(*err, RowColumn { row: 6, column: 3 }),
@@ -249,7 +277,7 @@ mod tests {
     #[test]
     fn invalid_sequence_reactivity() {
         const CONTENT: &str = include_str!("../test_data/query_invalid_reactivity.txt");
-        let err = read_file_content(Cursor::new(CONTENT)).unwrap_err();
+        let err = read_file_content(Cursor::new(CONTENT), 1.).unwrap_err();
 
         match err {
             Error::InvalidReactivity(err) => assert_eq!(*err, RowColumn { row: 7, column: 11 }),
@@ -260,7 +288,7 @@ mod tests {
     #[test]
     fn invalid_lengths() {
         const CONTENT: &str = include_str!("../test_data/query_invalid_lengths.txt");
-        let err = read_file_content(Cursor::new(CONTENT)).unwrap_err();
+        let err = read_file_content(Cursor::new(CONTENT), 1.).unwrap_err();
 
         match err {
             Error::UnmatchedLengths(err) => assert_eq!(
