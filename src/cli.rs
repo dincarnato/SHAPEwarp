@@ -1,7 +1,7 @@
 use clap::{ArgEnum, ArgGroup, Args, Parser};
 use std::{fmt, ops::Range, path::PathBuf, str::FromStr};
 
-use crate::Reactivity;
+use crate::{Distance, Reactivity};
 
 #[derive(Debug, Parser)]
 #[clap(
@@ -191,7 +191,7 @@ pub struct KmerLookupArgs {
     ///
     /// Note: the default value is automatically determined based on the chosen kmer length
     #[clap(long, requires = "match-kmer-gc-content", alias = "kmerMaxGCdiff")]
-    kmer_max_gc_diff: Option<f32>,
+    pub kmer_max_gc_diff: Option<f32>,
 
     /// The sequence of a query kmer and the corresponding database match must differ no more than
     /// --kmer-max-seq-dist
@@ -203,13 +203,8 @@ pub struct KmerLookupArgs {
     /// Note: when >= 1, this is interpreted as the absolute number of bases that are allowed to
     /// differ between the kmer and the matching region. When < 1, this is interpreted as a
     /// fraction of the kmer's length
-    #[clap(
-        long,
-        default_value_t = 0,
-        requires = "match-kmer-seq",
-        alias = "kmerMaxSeqDist"
-    )]
-    pub kmer_max_seq_dist: u32,
+    #[clap(long, requires = "match-kmer-seq", alias = "kmerMaxSeqDist")]
+    pub kmer_max_seq_dist: Option<Distance<u32>>,
 
     /// Minimum complexity (measured as Gini coefficient) of candidate kmers
     #[clap(long, default_value_t = 0.3, alias = "kmerMinComplexity")]

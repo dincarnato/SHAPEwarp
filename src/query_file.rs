@@ -14,6 +14,16 @@ pub struct Entry {
     reactivities: Vec<Reactivity>,
 }
 
+impl Entry {
+    pub(crate) fn sequence(&self) -> &[Base] {
+        &self.sequence
+    }
+
+    pub(crate) fn reactivities(&self) -> &[Reactivity] {
+        &self.reactivities
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("file truncated, expected sequence")]

@@ -1,6 +1,5 @@
 use std::{
     convert::TryInto,
-    ffi::CString,
     fs::File,
     io::{self, BufReader, Read, Seek, SeekFrom},
     path::Path,
@@ -46,7 +45,7 @@ where
         })
     }
 
-    pub fn entries(&mut self) -> EntryIter<R> {
+    pub fn entries(&mut self, max_reactivity: Reactivity) -> EntryIter<R> {
         let &mut Self {
             ref mut reader,
             end_offset,
@@ -57,6 +56,7 @@ where
             reader,
             end_offset,
             offset: 0,
+            max_reactivity,
         }
     }
 }
@@ -66,11 +66,12 @@ pub struct EntryIter<'a, R> {
     reader: &'a mut R,
     end_offset: u64,
     offset: u64,
+    max_reactivity: Reactivity,
 }
 
 #[derive(Debug)]
 pub struct Entry {
-    pub id: CString,
+    pub id: String,
     pub(crate) sequence: Vec<Base>,
     pub reactivity: Vec<Reactivity>,
 }
@@ -110,7 +111,7 @@ where
             return Some(Err(EntryError::InvalidSequenceId.into()));
         }
         let sequence_id =
-            ok!(CString::new(sequence_id).map_err(|_| { EntryError::InvalidSequenceId }));
+            ok!(String::from_utf8(sequence_id).map_err(|_| { EntryError::InvalidSequenceId }));
         let mut sequence_len_buf = [0; 4];
         ok!(self.reader.read_exact(&mut sequence_len_buf));
         let sequence_len: usize = u32::from_le_bytes(sequence_len_buf)
@@ -148,7 +149,14 @@ where
                     .map(|()| reactivity_buffer)
             })
             // Reactivity is an alias to either f32 or f64
-            .map_ok(|bytes| f64::from_le_bytes(bytes) as Reactivity)
+            .map_ok(|bytes| {
+                let reactivity = f64::from_le_bytes(bytes) as Reactivity;
+                if reactivity.is_nan() {
+                    -999.
+                } else {
+                    reactivity.min(self.max_reactivity)
+                }
+            })
             .collect::<Result<Vec<_>, _>>());
 
         if reactivity.len() != sequence_len {
@@ -223,9 +231,9 @@ impl From<EntryIoError> for Error {
     }
 }
 
-pub fn read_file(path: &Path) -> Result<Vec<Entry>, Error> {
+pub fn read_file(path: &Path, max_reactivity: Reactivity) -> Result<Vec<Entry>, Error> {
     let mut reader = Reader::new(BufReader::new(File::open(path)?))?;
-    let entries = reader.entries().collect::<Result<_, _>>()?;
+    let entries = reader.entries(max_reactivity).collect::<Result<_, _>>()?;
     Ok(entries)
 }
 
@@ -248,7 +256,7 @@ mod tests {
     fn read_all_db() {
         let mut reader = Reader::new(Cursor::new(TEST_DB)).unwrap();
         let db_len = reader
-            .entries()
+            .entries(1.)
             .map_ok(|entry| entry.sequence.len())
             .try_fold(0, |acc, seq_len| seq_len.map(|seq_len| acc + seq_len))
             .unwrap();
