@@ -171,7 +171,7 @@ pub struct KmerLookupArgs {
     pub min_kmers: u16,
 
     /// Maximum distance between two kmers to be merged in a HSG
-    #[clap(long, default_value_t = 30, alias = "minKmerDist")]
+    #[clap(long, default_value_t = 30, alias = "maxKmerDist")]
     pub max_kmer_dist: u16,
 
     /// Length (in nt) of the kmers
