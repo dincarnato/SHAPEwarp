@@ -8,7 +8,7 @@ use std::{
 
 use itertools::Itertools;
 
-use crate::Base;
+use crate::{Base, Reactivity};
 
 const END_SIZE: u8 = 17;
 const END_MARKER: &[u8] = b"[eofdb]";
@@ -72,7 +72,7 @@ pub struct EntryIter<'a, R> {
 pub struct Entry {
     pub id: CString,
     pub(crate) sequence: Vec<Base>,
-    pub reactivity: Vec<f64>,
+    pub reactivity: Vec<Reactivity>,
 }
 
 impl<R> Iterator for EntryIter<'_, R>
@@ -147,7 +147,8 @@ where
                     .read_exact(&mut reactivity_buffer)
                     .map(|()| reactivity_buffer)
             })
-            .map_ok(f64::from_le_bytes)
+            // Reactivity is an alias to either f32 or f64
+            .map_ok(|bytes| f64::from_le_bytes(bytes) as Reactivity)
             .collect::<Result<Vec<_>, _>>());
 
         if reactivity.len() != sequence_len {

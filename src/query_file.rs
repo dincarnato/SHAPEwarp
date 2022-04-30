@@ -5,13 +5,13 @@ use std::{
     path::Path,
 };
 
-use crate::Base;
+use crate::{Base, Reactivity};
 
 #[derive(Debug)]
 pub struct Entry {
     pub name: String,
     sequence: Vec<Base>,
-    reactivities: Vec<f32>,
+    reactivities: Vec<Reactivity>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -57,12 +57,12 @@ pub struct UnmatchedLengths {
 }
 
 #[inline]
-pub fn read_file(path: &Path, max_reactivity: f32) -> Result<Vec<Entry>, Error> {
+pub fn read_file(path: &Path, max_reactivity: Reactivity) -> Result<Vec<Entry>, Error> {
     let reader = BufReader::new(File::open(path).map_err(Box::new)?);
     read_file_content(reader, max_reactivity)
 }
 
-fn read_file_content<R>(mut reader: R, max_reactivity: f32) -> Result<Vec<Entry>, Error>
+fn read_file_content<R>(mut reader: R, max_reactivity: Reactivity) -> Result<Vec<Entry>, Error>
 where
     R: BufRead,
 {
@@ -126,10 +126,10 @@ where
                 }
 
                 let reactivity = if raw_reactivity.eq_ignore_ascii_case("NaN") {
-                    f32::NAN
+                    Reactivity::NAN
                 } else {
                     raw_reactivity
-                        .parse::<f32>()
+                        .parse::<Reactivity>()
                         .map_err(|_| {
                             Error::InvalidReactivity(Box::new(RowColumn {
                                 row: file_row,
@@ -206,8 +206,8 @@ mod tests {
 
     fn reactivities_eq<I1, I2>(a: I1, b: I2) -> bool
     where
-        I1: IntoIterator<Item = f32>,
-        I2: IntoIterator<Item = f32>,
+        I1: IntoIterator<Item = Reactivity>,
+        I2: IntoIterator<Item = Reactivity>,
     {
         a.into_iter().zip(b).all(|(a, b)| {
             if b.is_nan() {
@@ -228,14 +228,14 @@ mod tests {
         assert_eq!(entries[0].sequence, seq!(A C G T N));
         assert!(reactivities_eq(
             entries[0].reactivities.iter().copied(),
-            [0.123, 0.456, 0.789, 1., f32::NAN]
+            [0.123, 0.456, 0.789, 1., Reactivity::NAN]
         ));
 
         assert_eq!(entries[1].name, "test2");
         assert_eq!(entries[1].sequence, seq!(N A C G T));
         assert!(reactivities_eq(
             entries[1].reactivities.iter().copied(),
-            [f32::NAN, 1., 0.456, 0.789, 0.012]
+            [Reactivity::NAN, 1., 0.456, 0.789, 0.012]
         ));
     }
 

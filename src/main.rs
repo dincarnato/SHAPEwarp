@@ -16,6 +16,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     Ok(())
 }
 
+pub(crate) type Reactivity = f32;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Base {
     A,

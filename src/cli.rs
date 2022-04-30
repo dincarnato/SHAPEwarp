@@ -1,6 +1,8 @@
 use clap::{ArgEnum, ArgGroup, Args, Parser};
 use std::{fmt, ops::Range, path::PathBuf, str::FromStr};
 
+use crate::Reactivity;
+
 #[derive(Debug, Parser)]
 #[clap(
     author,
@@ -39,7 +41,7 @@ pub struct Cli {
 
     /// Maximum value to which reactivities will be capped
     #[clap(long, default_value_t = 1., alias = "maxReactivity")]
-    pub max_reactivity: f32,
+    pub max_reactivity: Reactivity,
 
     /// If two significant alignments overlap by more than this value, the least significant one
     /// (the one with the lowest alignment score) will be discarded
@@ -103,11 +105,11 @@ pub struct Cli {
 pub struct FoldingArgs {
     /// Slope for SHAPE reactivities conversion into pseudo-free energy contributions
     #[clap(long, default_value_t = 1.8, requires = "fold-opt-group")]
-    pub slope: f32,
+    pub slope: Reactivity,
 
     /// Intercept for SHAPE reactivities conversion into pseudo-free energy contributions
     #[clap(long, default_value_t = -0.6, requires = "fold-opt-group")]
-    pub intercept: f32,
+    pub intercept: Reactivity,
 
     /// Maximum allowed base-pairing distance
     #[clap(
@@ -222,11 +224,11 @@ pub struct KmerLookupArgs {
 pub struct AlignmentArgs {
     /// Minimum and maximum score reactivity differences below 0.5 will be mapped to
     #[clap(long, default_value_t = MinMax (0.0..2.), alias = "alignMatchScore")]
-    pub align_match_score: MinMax<f32>,
+    pub align_match_score: MinMax<Reactivity>,
 
     /// Minimum and maximum score reactivity differences above 0.5 will be mapped to
     #[clap(long, default_value_t = MinMax (-6.0..-0.5), alias = "alignMismatchScore")]
-    pub align_mismatch_score: MinMax<f32>,
+    pub align_mismatch_score: MinMax<Reactivity>,
 
     /// Gap open penalty
     #[clap(long, default_value_t = -14., alias = "alignGapOpenPenal")]
