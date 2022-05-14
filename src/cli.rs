@@ -218,7 +218,7 @@ pub struct KmerLookupArgs {
 #[derive(Debug, Args)]
 pub struct AlignmentArgs {
     /// Minimum and maximum score reactivity differences below 0.5 will be mapped to
-    #[clap(long, default_value_t = MinMax (0.0..2.), alias = "alignMatchScore")]
+    #[clap(long, default_value_t = MinMax (-0.5..2.), alias = "alignMatchScore")]
     pub align_match_score: MinMax<Reactivity>,
 
     /// Minimum and maximum score reactivity differences above 0.5 will be mapped to
