@@ -229,6 +229,10 @@ pub struct AlignmentArgs {
     #[clap(long, default_value_t = -14., alias = "alignGapOpenPenal")]
     pub align_gap_open_penalty: f32,
 
+    /// Gap extension penalty
+    #[clap(long, default_value_t = -5., alias = "alignGapExtPenal")]
+    pub align_gap_ext_penalty: f32,
+
     /// An alignment is allowed to drop by maximum this fraction of the best score encountered so
     /// far, before extension is interrupted
     #[clap(long, default_value_t = 0.8, alias = "alignMaxDropOffRate")]

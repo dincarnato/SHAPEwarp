@@ -5,7 +5,7 @@ use std::{
     path::Path,
 };
 
-use crate::{Base, Reactivity};
+use crate::{Base, Reactivity, SequenceEntry};
 
 #[derive(Debug)]
 pub struct Entry {
@@ -14,13 +14,17 @@ pub struct Entry {
     reactivities: Vec<Reactivity>,
 }
 
-impl Entry {
-    pub(crate) fn sequence(&self) -> &[Base] {
-        &self.sequence
+impl SequenceEntry for Entry {
+    fn name(&self) -> &str {
+        &self.name
     }
 
-    pub(crate) fn reactivities(&self) -> &[Reactivity] {
-        &self.reactivities
+    fn sequence(&self) -> &[Base] {
+        &*self.sequence
+    }
+
+    fn reactivity(&self) -> &[Reactivity] {
+        &*self.reactivities
     }
 }
 

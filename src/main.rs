@@ -1,3 +1,4 @@
+mod aligner;
 mod cli;
 mod db_file;
 mod mass;
@@ -45,7 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
 
             let db_data = DbData::new(sequence, reactivity)?;
             let matching_kmers = get_matching_kmers(
-                query_entry.reactivities(),
+                query_entry.reactivity(),
                 query_entry.sequence(),
                 &db_data,
                 &cli,
@@ -588,7 +589,7 @@ fn calc_seed_alignment_score(
     target_range: RangeInclusive<usize>,
     cli: &Cli,
 ) -> Reactivity {
-    let query_seed = &query.reactivities()[query_range.clone()];
+    let query_seed = &query.reactivity()[query_range.clone()];
     let target_seed = &target.reactivity[target_range.clone()];
 
     let mut seed_score = calc_seed_alignment_score_from_reactivity(query_seed, target_seed, cli);
@@ -627,6 +628,12 @@ fn calc_seed_align_tolerance(
         upstream,
         downstream,
     }
+}
+
+trait SequenceEntry {
+    fn name(&self) -> &str;
+    fn sequence(&self) -> &[Base];
+    fn reactivity(&self) -> &[Reactivity];
 }
 
 #[cfg(test)]

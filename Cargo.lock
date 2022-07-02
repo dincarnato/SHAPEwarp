@@ -29,7 +29,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f2a05fd1bd10b2527e20a2cd32d8873d115b8b39fe219ee25f42a8aca6ba278"
 dependencies = [
- "num-complex",
+ "num-complex 0.3.1",
  "num-traits",
 ]
 
@@ -168,8 +168,8 @@ dependencies = [
  "bitflags",
  "fftw-sys",
  "lazy_static 1.4.0",
- "ndarray",
- "num-complex",
+ "ndarray 0.14.0",
+ "num-complex 0.3.1",
  "num-traits",
  "thiserror",
 ]
@@ -195,7 +195,7 @@ checksum = "e8e3951d695cc2f17610cd041e87ebc15078d1af5eb8c6be77921381fc98b3fd"
 dependencies = [
  "fftw-src",
  "libc",
- "num-complex",
+ "num-complex 0.3.1",
 ]
 
 [[package]]
@@ -309,6 +309,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "matrixmultiply"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "add85d4dd35074e6fedc608f8c8f513a3548619a9024b751949ef0e8e45a4d84"
+dependencies = [
+ "rawpointer",
+]
+
+[[package]]
 name = "memchr"
 version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -332,8 +341,21 @@ version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c0d5c9540a691d153064dc47a4db2504587a75eae07bf1d73f7a596ebc73c04"
 dependencies = [
- "matrixmultiply",
- "num-complex",
+ "matrixmultiply 0.2.4",
+ "num-complex 0.3.1",
+ "num-integer",
+ "num-traits",
+ "rawpointer",
+]
+
+[[package]]
+name = "ndarray"
+version = "0.15.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dec23e6762830658d2b3d385a75aa212af2f67a4586d4442907144f3bb6a1ca8"
+dependencies = [
+ "matrixmultiply 0.3.2",
+ "num-complex 0.4.2",
  "num-integer",
  "num-traits",
  "rawpointer",
@@ -355,6 +377,15 @@ name = "num-complex"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "747d632c0c558b87dbabbe6a82f3b4ae03720d0646ac5b7b4dae89394be5f2c5"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "num-complex"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ae39348c8bc5fbd7f40c727a9925f03517afd2ab27d46702108b6a7e5414c19"
 dependencies = [
  "num-traits",
 ]
@@ -477,7 +508,8 @@ dependencies = [
  "fftw",
  "fnv",
  "itertools",
- "num-complex",
+ "ndarray 0.15.4",
+ "num-complex 0.3.1",
  "num-traits",
  "smallvec",
  "thiserror",

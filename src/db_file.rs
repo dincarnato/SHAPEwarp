@@ -7,7 +7,7 @@ use std::{
 
 use itertools::Itertools;
 
-use crate::{Base, Reactivity};
+use crate::{Base, Reactivity, SequenceEntry};
 
 const END_SIZE: u8 = 17;
 const END_MARKER: &[u8] = b"[eofdb]";
@@ -74,6 +74,20 @@ pub struct Entry {
     pub id: String,
     pub(crate) sequence: Vec<Base>,
     pub reactivity: Vec<Reactivity>,
+}
+
+impl SequenceEntry for Entry {
+    fn name(&self) -> &str {
+        &self.id
+    }
+
+    fn sequence(&self) -> &[Base] {
+        &*self.sequence
+    }
+
+    fn reactivity(&self) -> &[Reactivity] {
+        &*self.reactivity
+    }
 }
 
 impl<R> Iterator for EntryIter<'_, R>
