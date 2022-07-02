@@ -2,6 +2,7 @@ mod aligner;
 mod cli;
 mod db_file;
 mod mass;
+mod null_model;
 mod query_file;
 
 use std::{
