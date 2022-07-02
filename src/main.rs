@@ -108,15 +108,15 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
 fn align_query_to_target_db<'q, 'db, 'cli>(
     query_entry: &'q query_file::Entry,
     db_entries: &'db [db_file::Entry],
-    query_results: &mut Vec<ShapewarpResult<'db>>,
+    query_results: &mut Vec<DbEntryMatches<'db>>,
     cli: &'cli Cli,
-) -> Result<QueryAligner<'q, 'db, 'cli>, Box<dyn std::error::Error + Send + Sync + 'static>> {
+) -> Result<QueryAligner<'q, 'cli>, Box<dyn std::error::Error + Send + Sync + 'static>> {
     query_results.clear();
     for db_entry in db_entries {
         let db_file::Entry {
-            id,
             sequence,
             reactivity,
+            ..
         } = db_entry;
 
         let db_data = DbData::new(sequence, reactivity)?;
@@ -129,43 +129,33 @@ fn align_query_to_target_db<'q, 'db, 'cli>(
         let grouped = group_matching_kmers(&matching_kmers, cli);
 
         if grouped.is_empty().not() {
-            query_results.push(ShapewarpResult {
-                db_id: &**id,
-                db: grouped,
+            query_results.push(DbEntryMatches {
+                db_entry,
+                matches: grouped,
             });
         }
     }
 
-    Ok(QueryAligner {
-        query_entry,
-        db_entries,
-        cli,
-    })
+    Ok(QueryAligner { query_entry, cli })
 }
 
-struct QueryAligner<'q, 'db, 'cli> {
+struct QueryAligner<'q, 'cli> {
     query_entry: &'q query_file::Entry,
-    db_entries: &'db [db_file::Entry],
     cli: &'cli Cli,
 }
 
-impl<'q, 'db, 'cli> QueryAligner<'q, 'db, 'cli> {
-    fn into_iter<'res, 'aln>(
+impl<'q, 'cli> QueryAligner<'q, 'cli> {
+    fn into_iter<'res, 'db, 'aln>(
         self,
-        query_results: &'res [ShapewarpResult<'db>],
+        query_results: &'res [DbEntryMatches<'db>],
         aligner: &'aln mut Aligner<'cli>,
     ) -> QueryAlignIterator<'q, 'db, 'res, 'cli, 'aln> {
-        let Self {
-            query_entry,
-            db_entries,
-            cli,
-        } = self;
+        let Self { query_entry, cli } = self;
 
         let query_results = query_results.iter();
         QueryAlignIterator::Empty {
             query_results,
             query_entry,
-            db_entries,
             cli,
             aligner,
         }
@@ -174,17 +164,15 @@ impl<'q, 'db, 'cli> QueryAligner<'q, 'db, 'cli> {
 
 enum QueryAlignIterator<'q, 'db, 'res, 'cli, 'aln> {
     Empty {
-        query_results: slice::Iter<'res, ShapewarpResult<'db>>,
+        query_results: slice::Iter<'res, DbEntryMatches<'db>>,
         query_entry: &'q query_file::Entry,
-        db_entries: &'db [db_file::Entry],
         cli: &'cli Cli,
         aligner: &'aln mut Aligner<'cli>,
     },
     Full {
-        query_results: slice::Iter<'res, ShapewarpResult<'db>>,
+        query_results: slice::Iter<'res, DbEntryMatches<'db>>,
         iter: QueryAlignIteratorInner<'q, 'db, 'res, 'cli, 'aln>,
         query_entry: &'q query_file::Entry,
-        db_entries: &'db [db_file::Entry],
         cli: &'cli Cli,
     },
     Finished,
@@ -196,19 +184,17 @@ impl<'q, 'db, 'res, 'cli, 'aln> QueryAlignIterator<'q, 'db, 'res, 'cli, 'aln> {
             Self::Empty {
                 query_results,
                 query_entry,
-                db_entries,
                 cli,
                 aligner,
-            } => self.create_new_state(query_results, query_entry, db_entries, cli, aligner),
+            } => self.create_new_state(query_results, query_entry, cli, aligner),
             Self::Full {
                 query_results,
                 iter,
                 query_entry,
-                db_entries,
                 cli,
             } => {
                 let aligner = iter.aligner;
-                self.create_new_state(query_results, query_entry, db_entries, cli, aligner)
+                self.create_new_state(query_results, query_entry, cli, aligner)
             }
             Self::Finished => None,
         }
@@ -216,17 +202,18 @@ impl<'q, 'db, 'res, 'cli, 'aln> QueryAlignIterator<'q, 'db, 'res, 'cli, 'aln> {
 
     fn create_new_state(
         &mut self,
-        mut query_results: slice::Iter<'res, ShapewarpResult<'db>>,
+        mut query_results: slice::Iter<'res, DbEntryMatches<'db>>,
         query_entry: &'q query_file::Entry,
-        db_entries: &'db [db_file::Entry],
         cli: &'cli Cli,
         aligner: &'aln mut Aligner<'cli>,
     ) -> Option<&mut QueryAlignIteratorInner<'q, 'db, 'res, 'cli, 'aln>> {
         query_results
             .next()
             .map(|query_result| {
-                let &ShapewarpResult { db_id, ref db } = query_result;
-                let db_entry = db_entries.iter().find(|entry| entry.id == db_id).unwrap();
+                let &DbEntryMatches {
+                    db_entry,
+                    matches: ref db,
+                } = query_result;
 
                 QueryAlignIteratorInner {
                     aligner,
@@ -242,7 +229,6 @@ impl<'q, 'db, 'res, 'cli, 'aln> QueryAlignIterator<'q, 'db, 'res, 'cli, 'aln> {
                     query_results,
                     iter,
                     query_entry,
-                    db_entries,
                     cli,
                 };
 
@@ -255,7 +241,7 @@ impl<'q, 'db, 'res, 'cli, 'aln> QueryAlignIterator<'q, 'db, 'res, 'cli, 'aln> {
 }
 
 impl<'q, 'db, 'res, 'cli, 'aln> Iterator for QueryAlignIterator<'q, 'db, 'res, 'cli, 'aln> {
-    type Item = (&'res ShapewarpResult<'db>, Reactivity);
+    type Item = (&'res DbEntryMatches<'db>, Reactivity);
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
@@ -271,15 +257,15 @@ impl<'q, 'db, 'res, 'cli, 'aln> Iterator for QueryAlignIterator<'q, 'db, 'res, '
 
 struct QueryAlignIteratorInner<'q, 'db, 'res, 'cli, 'aln> {
     aligner: &'aln mut Aligner<'cli>,
-    db_iter: slice::Iter<'res, ShapewarpDbResult>,
+    db_iter: slice::Iter<'res, MatchRanges>,
     query_entry: &'q query_file::Entry,
-    query_result: &'res ShapewarpResult<'db>,
+    query_result: &'res DbEntryMatches<'db>,
     db_entry: &'db db_file::Entry,
     cli: &'cli Cli,
 }
 
 impl<'q, 'db, 'res, 'cli, 'aln> Iterator for QueryAlignIteratorInner<'q, 'db, 'res, 'cli, 'aln> {
-    type Item = (&'res ShapewarpResult<'db>, Reactivity);
+    type Item = (&'res DbEntryMatches<'db>, Reactivity);
 
     fn next(&mut self) -> Option<Self::Item> {
         let &mut Self {
@@ -305,7 +291,7 @@ impl<'q, 'db, 'res, 'cli, 'aln> Iterator for QueryAlignIteratorInner<'q, 'db, 'r
                 continue;
             }
 
-            let ShapewarpDbResult { db, query } = db.clone();
+            let MatchRanges { db, query } = db.clone();
 
             let upstream_result = aligner.align(
                 query_entry,
@@ -777,21 +763,19 @@ fn hamming_distance<T: Eq>(a: &[T], b: &[T]) -> usize {
     a.iter().zip(b).filter(|(a, b)| a != b).count()
 }
 
-// TODO: rename and refactor me
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ShapewarpDbResult {
+pub struct MatchRanges {
     db: RangeInclusive<usize>,
     query: RangeInclusive<usize>,
 }
 
-// TODO: rename and refactor me
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ShapewarpResult<'a> {
-    db_id: &'a str,
-    db: Vec<ShapewarpDbResult>,
+#[derive(Debug, Clone)]
+pub struct DbEntryMatches<'a> {
+    db_entry: &'a db_file::Entry,
+    matches: Vec<MatchRanges>,
 }
 
-fn group_matching_kmers(matching_kmers: &[[usize; 2]], cli: &Cli) -> Vec<ShapewarpDbResult> {
+fn group_matching_kmers(matching_kmers: &[[usize; 2]], cli: &Cli) -> Vec<MatchRanges> {
     let &Cli {
         kmer_lookup_args:
             cli::KmerLookupArgs {
@@ -814,7 +798,7 @@ fn group_matching_kmers(matching_kmers: &[[usize; 2]], cli: &Cli) -> Vec<Shapewa
     let max_distance = usize::from(max_kmer_dist) + kmer_len;
     let mut groups = Vec::new();
     let mut add_group = |first: &[usize; 2], last: &[usize; 2]| {
-        let group = ShapewarpDbResult {
+        let group = MatchRanges {
             query: first[0]..=(last[0] + kmer_len - 1),
             db: first[1]..=(last[1] + kmer_len - 1),
         };
@@ -1551,392 +1535,392 @@ mod tests {
         [188, 796],
     ];
 
-    const GROUPS: &[ShapewarpDbResult] = &[
-        ShapewarpDbResult {
+    const GROUPS: &[MatchRanges] = &[
+        MatchRanges {
             db: 676..=689,
             query: 0..=13,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1158..=1171,
             query: 0..=13,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1380..=1393,
             query: 0..=13,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 17..=32,
             query: 0..=15,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 32..=45,
             query: 2..=15,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 890..=902,
             query: 3..=15,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1001..=1013,
             query: 5..=17,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1426..=1440,
             query: 5..=19,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 754..=766,
             query: 6..=18,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1168..=1182,
             query: 12..=26,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1214..=1227,
             query: 14..=27,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1033..=1051,
             query: 14..=32,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 425..=438,
             query: 17..=30,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 849..=862,
             query: 17..=30,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 335..=347,
             query: 20..=32,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1236..=1248,
             query: 20..=32,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 630..=644,
             query: 35..=49,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 77..=90,
             query: 36..=49,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 802..=815,
             query: 36..=49,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 755..=767,
             query: 63..=75,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1166..=1183,
             query: 65..=82,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 184..=200,
             query: 66..=82,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1256..=1272,
             query: 66..=82,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1110..=1122,
             query: 67..=79,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 620..=634,
             query: 67..=81,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1033..=1046,
             query: 69..=82,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1214..=1227,
             query: 69..=82,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 383..=396,
             query: 70..=83,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1013..=1031,
             query: 74..=92,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 683..=713,
             query: 75..=105,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 131..=145,
             query: 76..=90,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 496..=509,
             query: 77..=90,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 619..=632,
             query: 77..=90,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 41..=53,
             query: 80..=92,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1104..=1116,
             query: 80..=92,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1295..=1307,
             query: 86..=98,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1435..=1448,
             query: 87..=100,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1394..=1406,
             query: 88..=100,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 922..=935,
             query: 93..=106,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1230..=1244,
             query: 93..=107,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 19..=34,
             query: 93..=108,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 892..=905,
             query: 96..=109,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1363..=1375,
             query: 97..=109,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 545..=559,
             query: 97..=111,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1286..=1298,
             query: 98..=110,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 114..=134,
             query: 100..=120,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1226..=1240,
             query: 106..=120,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 886..=899,
             query: 107..=120,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 16..=30,
             query: 107..=121,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1415..=1431,
             query: 111..=127,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 543..=558,
             query: 112..=127,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1114..=1129,
             query: 112..=127,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 870..=887,
             query: 113..=130,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1158..=1170,
             query: 114..=126,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1363..=1375,
             query: 114..=126,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1286..=1301,
             query: 115..=130,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1234..=1261,
             query: 119..=146,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 85..=97,
             query: 121..=133,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 388..=400,
             query: 121..=133,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 928..=940,
             query: 121..=133,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 936..=948,
             query: 121..=133,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 732..=807,
             query: 124..=199,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 611..=624,
             query: 127..=140,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 84..=96,
             query: 131..=143,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 404..=416,
             query: 134..=146,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1025..=1037,
             query: 134..=146,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1436..=1448,
             query: 134..=146,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 21..=37,
             query: 136..=152,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 543..=559,
             query: 136..=152,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 303..=315,
             query: 137..=149,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1271..=1283,
             query: 137..=149,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1147..=1160,
             query: 139..=152,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 493..=505,
             query: 147..=159,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 662..=674,
             query: 147..=159,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 480..=493,
             query: 150..=163,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 630..=643,
             query: 150..=163,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1109..=1122,
             query: 150..=163,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1379..=1391,
             query: 151..=163,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 616..=628,
             query: 166..=178,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 952..=964,
             query: 166..=178,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 239..=252,
             query: 166..=179,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 661..=674,
             query: 166..=179,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 354..=368,
             query: 166..=180,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1248..=1261,
             query: 169..=182,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1316..=1328,
             query: 170..=182,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 716..=728,
             query: 171..=183,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 507..=521,
             query: 171..=185,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 77..=89,
             query: 172..=184,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 802..=814,
             query: 172..=184,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 27..=39,
             query: 177..=189,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 167..=179,
             query: 177..=189,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1020..=1032,
             query: 177..=189,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 681..=693,
             query: 178..=190,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 562..=576,
             query: 183..=197,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 1168..=1182,
             query: 183..=197,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 76..=92,
             query: 183..=199,
         },
-        ShapewarpDbResult {
+        MatchRanges {
             db: 844..=856,
             query: 184..=196,
         },
