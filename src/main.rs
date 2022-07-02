@@ -6,15 +6,18 @@ mod null_model;
 mod query_file;
 
 use std::{
-    fmt,
+    fmt::{self, Write},
     iter::Sum,
+    mem,
     num::ParseFloatError,
     ops::{Not, RangeInclusive},
+    slice,
     str::FromStr,
 };
 
+use aligner::{Aligner, Direction};
 use clap::Parser;
-use cli::MinMax;
+use cli::{AlignmentFoldingEvaluationArgs, MinMax};
 use fftw::{
     array::{AlignedAllocable, AlignedVec},
     plan::{C2CPlan, C2CPlan32, C2CPlan64},
@@ -23,6 +26,7 @@ use fftw::{
 use fnv::FnvHashMap;
 use itertools::Itertools;
 use mass::{ComplexExt, Mass};
+use null_model::*;
 use num_complex::Complex;
 use num_traits::{
     cast, float::FloatCore, Float, FromPrimitive, NumAssign, NumAssignRef, NumOps, NumRef, RefNum,
@@ -33,53 +37,301 @@ use crate::cli::Cli;
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     let cli = Cli::parse();
+
+    let Cli {
+        alignment_folding_eval_args:
+            AlignmentFoldingEvaluationArgs {
+                block_size,
+                shufflings,
+                ..
+            },
+        inclusion_evalue,
+        ..
+    } = cli;
+
     let query_entries = query_file::read_file(&cli.query, cli.max_reactivity)?;
     let db_entries = db_file::read_file(&cli.database, cli.max_reactivity)?;
+    let db_entries_shuffled = make_shuffled_db(
+        &db_entries,
+        0, /* ? */
+        block_size.into(),
+        shufflings.into(),
+    );
+
+    let mut aligner = Aligner::new(&cli);
+    let mut null_all_scores = Vec::new();
+    let mut null_scores = Vec::new();
+    let mut query_all_results = Vec::new();
+    let mut query_results = Vec::new();
 
     for query_entry in query_entries {
-        let mut query_results = Vec::new();
-        for db_entry in &db_entries {
-            let db_file::Entry {
-                id,
-                sequence,
-                reactivity,
-            } = db_entry;
+        let null_aligner = align_query_to_target_db(
+            &query_entry,
+            &db_entries_shuffled,
+            &mut null_all_scores,
+            &cli,
+        )?;
+        null_scores.clear();
+        null_scores.extend(
+            null_aligner
+                .into_iter(&query_all_results, &mut aligner)
+                .take(cli.null_hsgs.try_into().unwrap_or(usize::MAX))
+                .map(|(_, score)| score),
+        );
+        let null_distribution = ExtremeDistribution::from_sample(&null_scores);
 
-            let db_data = DbData::new(sequence, reactivity)?;
-            let matching_kmers = get_matching_kmers(
-                query_entry.reactivity(),
-                query_entry.sequence(),
-                &db_data,
-                &cli,
-            )?;
-            let grouped = group_matching_kmers(&matching_kmers, &cli);
+        query_results.clear();
+        query_results.extend(
+            align_query_to_target_db(&query_entry, &db_entries, &mut query_all_results, &cli)?
+                .into_iter(&query_all_results, &mut aligner)
+                // FIXME: we need to avoid this clone
+                .map(|(result, score)| {
+                    let p_value = null_distribution.p_value(score);
+                    (result.clone(), score, p_value, 0.)
+                }),
+        );
 
-            if grouped.is_empty().not() {
-                query_results.push(ShapewarpResult {
-                    db_id: &*id,
-                    db: grouped,
-                });
-            }
-        }
+        let results_len = query_results.len() as f64;
+        query_results.retain_mut(|(_, _, p_value, e_value)| {
+            *e_value = *p_value * results_len;
+            *e_value <= inclusion_evalue
+        });
 
-        for query_result in query_results {
-            let ShapewarpResult { db_id, db } = query_result;
-            let db_entry = db_entries.iter().find(|entry| entry.id == db_id).unwrap();
+        // TODO: remove overlapping
 
-            for db_result in db {
-                let ShapewarpDbResult { db, query } = db_result;
-
-                let seed_score = calc_seed_alignment_score(&query_entry, db_entry, query, db, &cli);
-                if seed_score <= 0. {
-                    continue;
-                }
-
-                todo!()
-            }
-        }
+        // TODO
     }
 
     todo!()
+}
+
+fn align_query_to_target_db<'q, 'db, 'cli>(
+    query_entry: &'q query_file::Entry,
+    db_entries: &'db [db_file::Entry],
+    query_results: &mut Vec<ShapewarpResult<'db>>,
+    cli: &'cli Cli,
+) -> Result<QueryAligner<'q, 'db, 'cli>, Box<dyn std::error::Error + Send + Sync + 'static>> {
+    query_results.clear();
+    for db_entry in db_entries {
+        let db_file::Entry {
+            id,
+            sequence,
+            reactivity,
+        } = db_entry;
+
+        let db_data = DbData::new(sequence, reactivity)?;
+        let matching_kmers = get_matching_kmers(
+            query_entry.reactivity(),
+            query_entry.sequence(),
+            &db_data,
+            cli,
+        )?;
+        let grouped = group_matching_kmers(&matching_kmers, cli);
+
+        if grouped.is_empty().not() {
+            query_results.push(ShapewarpResult {
+                db_id: &**id,
+                db: grouped,
+            });
+        }
+    }
+
+    Ok(QueryAligner {
+        query_entry,
+        db_entries,
+        cli,
+    })
+}
+
+struct QueryAligner<'q, 'db, 'cli> {
+    query_entry: &'q query_file::Entry,
+    db_entries: &'db [db_file::Entry],
+    cli: &'cli Cli,
+}
+
+impl<'q, 'db, 'cli> QueryAligner<'q, 'db, 'cli> {
+    fn into_iter<'res, 'aln>(
+        self,
+        query_results: &'res [ShapewarpResult<'db>],
+        aligner: &'aln mut Aligner<'cli>,
+    ) -> QueryAlignIterator<'q, 'db, 'res, 'cli, 'aln> {
+        let Self {
+            query_entry,
+            db_entries,
+            cli,
+        } = self;
+
+        let query_results = query_results.iter();
+        QueryAlignIterator::Empty {
+            query_results,
+            query_entry,
+            db_entries,
+            cli,
+            aligner,
+        }
+    }
+}
+
+enum QueryAlignIterator<'q, 'db, 'res, 'cli, 'aln> {
+    Empty {
+        query_results: slice::Iter<'res, ShapewarpResult<'db>>,
+        query_entry: &'q query_file::Entry,
+        db_entries: &'db [db_file::Entry],
+        cli: &'cli Cli,
+        aligner: &'aln mut Aligner<'cli>,
+    },
+    Full {
+        query_results: slice::Iter<'res, ShapewarpResult<'db>>,
+        iter: QueryAlignIteratorInner<'q, 'db, 'res, 'cli, 'aln>,
+        query_entry: &'q query_file::Entry,
+        db_entries: &'db [db_file::Entry],
+        cli: &'cli Cli,
+    },
+    Finished,
+}
+
+impl<'q, 'db, 'res, 'cli, 'aln> QueryAlignIterator<'q, 'db, 'res, 'cli, 'aln> {
+    fn make_new_iter(&mut self) -> Option<&mut QueryAlignIteratorInner<'q, 'db, 'res, 'cli, 'aln>> {
+        match mem::replace(self, Self::Finished) {
+            Self::Empty {
+                query_results,
+                query_entry,
+                db_entries,
+                cli,
+                aligner,
+            } => self.create_new_state(query_results, query_entry, db_entries, cli, aligner),
+            Self::Full {
+                query_results,
+                iter,
+                query_entry,
+                db_entries,
+                cli,
+            } => {
+                let aligner = iter.aligner;
+                self.create_new_state(query_results, query_entry, db_entries, cli, aligner)
+            }
+            Self::Finished => None,
+        }
+    }
+
+    fn create_new_state(
+        &mut self,
+        mut query_results: slice::Iter<'res, ShapewarpResult<'db>>,
+        query_entry: &'q query_file::Entry,
+        db_entries: &'db [db_file::Entry],
+        cli: &'cli Cli,
+        aligner: &'aln mut Aligner<'cli>,
+    ) -> Option<&mut QueryAlignIteratorInner<'q, 'db, 'res, 'cli, 'aln>> {
+        query_results
+            .next()
+            .map(|query_result| {
+                let &ShapewarpResult { db_id, ref db } = query_result;
+                let db_entry = db_entries.iter().find(|entry| entry.id == db_id).unwrap();
+
+                QueryAlignIteratorInner {
+                    aligner,
+                    db_iter: db.iter(),
+                    query_entry,
+                    query_result,
+                    db_entry,
+                    cli,
+                }
+            })
+            .map(move |iter| {
+                *self = Self::Full {
+                    query_results,
+                    iter,
+                    query_entry,
+                    db_entries,
+                    cli,
+                };
+
+                match self {
+                    Self::Full { iter, .. } => iter,
+                    _ => unreachable!(),
+                }
+            })
+    }
+}
+
+impl<'q, 'db, 'res, 'cli, 'aln> Iterator for QueryAlignIterator<'q, 'db, 'res, 'cli, 'aln> {
+    type Item = (&'res ShapewarpResult<'db>, Reactivity);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Empty { .. } => self.make_new_iter()?.next(),
+            Self::Full { iter, .. } => match iter.next() {
+                Some(item) => Some(item),
+                None => self.make_new_iter()?.next(),
+            },
+            Self::Finished { .. } => None,
+        }
+    }
+}
+
+struct QueryAlignIteratorInner<'q, 'db, 'res, 'cli, 'aln> {
+    aligner: &'aln mut Aligner<'cli>,
+    db_iter: slice::Iter<'res, ShapewarpDbResult>,
+    query_entry: &'q query_file::Entry,
+    query_result: &'res ShapewarpResult<'db>,
+    db_entry: &'db db_file::Entry,
+    cli: &'cli Cli,
+}
+
+impl<'q, 'db, 'res, 'cli, 'aln> Iterator for QueryAlignIteratorInner<'q, 'db, 'res, 'cli, 'aln> {
+    type Item = (&'res ShapewarpResult<'db>, Reactivity);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let &mut Self {
+            ref mut aligner,
+            ref mut db_iter,
+            query_entry,
+            query_result,
+            db_entry,
+            cli,
+        } = self;
+
+        loop {
+            let db = db_iter.next()?;
+            let seed_score = calc_seed_alignment_score(
+                query_entry,
+                db_entry,
+                db.query.clone(),
+                db.db.clone(),
+                cli,
+            );
+
+            if seed_score <= 0. {
+                continue;
+            }
+
+            let ShapewarpDbResult { db, query } = db.clone();
+
+            let upstream_result = aligner.align(
+                query_entry,
+                db_entry,
+                query.clone(),
+                db.clone(),
+                seed_score,
+                Direction::Upstream,
+            );
+
+            let downstream_result = aligner.align(
+                query_entry,
+                db_entry,
+                query,
+                db,
+                upstream_result.score,
+                Direction::Downstream,
+            );
+
+            let aligned_query_len = downstream_result.query_index + 1 - upstream_result.query_index;
+            let score = ((aligned_query_len as f64).ln()
+                / (query_entry.sequence().len() as f64).ln()) as Reactivity;
+
+            break Some((query_result, score));
+        }
+    }
 }
 
 pub(crate) type Reactivity = f32;
@@ -136,6 +388,21 @@ impl TryFrom<u8> for Base {
             b'N' => Self::N,
             _ => return Err(InvalidEncodedBase),
         })
+    }
+}
+
+impl fmt::Display for Base {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let byte = self.to_byte();
+        f.write_char(byte.into())
+    }
+}
+
+struct Sequence<'a>(pub &'a [Base]);
+
+impl fmt::Display for Sequence<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.iter().try_for_each(|base| base.fmt(f))
     }
 }
 

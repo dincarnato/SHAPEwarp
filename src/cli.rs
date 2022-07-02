@@ -54,11 +54,11 @@ pub struct Cli {
 
     /// E-value threshold to consider an alignment significant
     #[clap(long, default_value_t = 0.01, aliases = &["inclusionEvalue", "incE"], visible_alias = "inc-e")]
-    pub inclusion_evalue: f32,
+    pub inclusion_evalue: f64,
 
     /// E-value threshold to report a match
     #[clap(long, default_value_t = 0.1, aliases = &["reportEvalue", "repE"], visible_alias = "rep-e")]
-    pub report_evalue: f32,
+    pub report_evalue: f64,
 
     /// Besides printing the result summary to screen, matches are reported as a TSV file
     #[clap(long, alias = "tblOut")]

@@ -69,7 +69,7 @@ pub struct EntryIter<'a, R> {
     max_reactivity: Reactivity,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Entry {
     pub id: String,
     pub(crate) sequence: Vec<Base>,
