@@ -379,3 +379,10 @@ pub enum ReportAlignment {
     #[clap(alias = "s")]
     Stockholm,
 }
+
+impl Cli {
+    #[cfg(test)]
+    pub(crate) fn dummy() -> Self {
+        Self::parse_from(["test", "--database", "test", "--query", "test"])
+    }
+}
