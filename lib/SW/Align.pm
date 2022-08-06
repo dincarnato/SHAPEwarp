@@ -137,7 +137,7 @@ sub align {
     $fullAln{querySeq} .= $partAln{querySeq};
     $fullAln{dbEnd} = $partAln{score} ? $self->{dbSeed}->[1] + $partAln{dbEnd} + 1 : $self->{dbSeed}->[1];
     $fullAln{queryEnd} = $partAln{score} ? $self->{querySeed}->[1] + $partAln{queryEnd} + 1 : $self->{querySeed}->[1];
-    $fullAln{score} = $partAln{score} ? $partAln{score} : $self->{startScore};
+    $fullAln{score} = $partAln{score} ? $partAln{score} : $fullAln{score};
     push(@{$fullAln{dbGaps}}, $-[0]) while($fullAln{dbSeq} =~ m/-/g);
     push(@{$fullAln{queryGaps}}, $-[0]) while($fullAln{querySeq} =~ m/-/g);
 

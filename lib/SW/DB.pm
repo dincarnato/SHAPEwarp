@@ -20,8 +20,10 @@ sub new {
     $self->_init({ index       => undef,
                    buildIndex  => 0,
                    dbSize      => 0,
+                   blockSize   => 10000,
                    _offsets    => {},
                    _lengths    => {},
+                   _lastSeq    => {},
                    _lastOffset => 0 }, \%parameters);
 
     $self->{binmode} = ":raw";
@@ -120,7 +122,7 @@ sub _loadIndex {
             $length = unpack("L<", $data);
 
             $self->{_offsets}->{$id} = $offset;
-            $self->{_lengths}->{$id} = $length if ($self->mode() eq "w+");
+            $self->{_lengths}->{$id} = $length;
 
             $offset += 8 * ($length + 1) + length($id) + 1 + ($length + ($length % 2)) / 2;
 
@@ -227,6 +229,86 @@ sub read {
 
 }
 
+sub readBytewise {
+
+    my $self = shift;
+    my ($id, @ranges) = @_ if (@_);
+
+    return if (!exists $self->{_offsets}->{$id});
+
+    my ($fh, $data, $entry, $length,
+        $beginArray, $sequence, @reactivity);
+    $fh = $self->{_fh};
+    $length = $self->{_lengths}->{$id};
+    $beginArray = $self->{_offsets}->{$id} + 8 + length($id) + 1 + ($length + ($length % 2)) / 2;
+
+    # There is no point at reading the sequence multiple times if several
+    # calls have to be made to readBytewise(), so we save it
+    if ($id ne $self->{_lastSeq}->{id}) {
+
+        seek($fh, $self->{_offsets}->{$id} + 4 + length($id) + 1 + 4, SEEK_SET); # sets the fh to the position of sequence
+        read($fh, $data, ($length + ($length % 2)) / 2);
+        $data = unpack("H*", $data);
+        $data =~ tr/43210/NTGCA/;
+
+        $self->{_lastSeq} = { id       => $id,
+                              sequence => substr($data, 0, $length) };
+
+        undef($data);
+
+    }
+
+    foreach my $range (@ranges) {
+
+        $self->throw("Ranges must be ARRAY refs") if (ref($range) ne "ARRAY");
+        $self->throw("Range outside of sequence boundaries") if ($range->[0] >= $length || $range->[1] >= $length);
+
+        my $rangeLen = $range->[1] - $range->[0] + 1;
+        $sequence .= substr($self->{_lastSeq}->{sequence}, $range->[0], $rangeLen);
+        seek($fh, $beginArray + 8 * $range->[0], SEEK_SET);
+        read($fh, $data, 8 * $rangeLen);
+        push(@reactivity, unpack("d*", $data));
+
+    }
+
+    @reactivity = map { isnegative($_) ? "NaN" : $_ } @reactivity;
+    $entry = SW::DB::Entry->new( id         => $id,
+                                 sequence   => $sequence,
+                                 reactivity => \@reactivity );
+
+    return($entry);
+
+}
+
+sub writeBytewise {
+
+    my $self = shift;
+    my ($id, $pos, $counts) = @_ if (@_);
+
+    $self->throw("Filehandle isn't in append mode") unless ($self->mode() eq "w+");
+
+    my ($fh, $length, $beginArray, @undef);
+    $fh = $self->{_fh};
+    $length = $self->{_lengths}->{$id} if (exists $self->{_lengths}->{$id});
+
+    # An undefined issue exists with Perl's threads, that sometimes causes
+    # failure in index loading, thus we make a check and reload the index (just in case)
+    if (!keys %{$self->{_offsets}}) { $self->_loadindex(); }
+
+    $self->throw("Sequence ID \"" . $id . "\" is absent in file \"" . $self->{file} . "\"") if (!$length);
+    $self->throw("Position exceeds sequence's length (" . $pos . " >= " . $self->{_lengths}->{$id} . ")") if ($pos >= $length);
+    $self->throw("Data exceeds sequence's length") if ($pos + @$counts - 1 >= $length);
+
+    # If there are missing values, we will set them to -999 (these will be re-read as NaNs)
+    @undef = grep { !defined $counts->[$_] } 0 .. $#{$counts};
+    @{$counts}[@undef] = (-999) x scalar(@undef) if (@undef);
+
+    $beginArray = $self->{_offsets}->{$id} + 8 + length($id) + 1 + ($length + ($length % 2)) / 2;
+    seek($fh, $beginArray + 8 * $pos, SEEK_SET);
+    print $fh pack("d*", @{$counts});
+
+}
+
 sub write {
 
     my $self = shift;
@@ -252,12 +334,10 @@ sub write {
         $id = $entry->id();
         $seq = $entry->sequence;
         $seq =~ tr/NTGCA/43210/;
-        $length = length($seq);
+        $length = $entry->length();
         @reactivity = map { isnan($_) ? -999 : $_ } $entry->reactivity();
 
-        if (!defined $seq ||
-            !defined $id ||
-            !@reactivity) {
+        if (!$length || !defined $id) {
 
             $self->warn("Empty DWS::DB::Entry object");
 
@@ -281,8 +361,30 @@ sub write {
         print $fh pack("L<", length($id) + 1) .             # len_transcript_id (uint32_t)
                   $id . "\0" .                              # transcript_id (char[len_transcript_id])
                   pack("L<", length($seq)) .                # len_seq (uint32_t)
-                  pack("H*", $seq) .                        # seq (uint8_t[(len_seq+1)/2])
-                  pack("d*", @reactivity);
+                  pack("H*", $seq);                         # seq (uint8_t[(len_seq+1)/2])
+
+        if (@reactivity) { print $fh pack("d*", @reactivity); }
+        else {
+
+            # This is meant for very large sequences (i.e. an entire chromosome)
+            if ($length > $self->{blockSize}) {
+
+                my ($nBlocks, $left);
+                $nBlocks = POSIX::floor($length / $self->{blockSize});
+                $left = $length - ($self->{blockSize} * $nBlocks);
+
+                print $fh pack("d*", (-999) x $self->{blockSize}) for (1 .. $nBlocks);
+                print $fh pack("d*", (-999) x $left);
+
+            }
+            else {
+
+                @reactivity = (-999) x $length;
+                print $fh pack("d*", @reactivity);
+
+            }
+
+        }
 
         $self->{dbSize} += $length;
 
@@ -360,6 +462,17 @@ sub ids {
     my @ids = sort keys %{$self->{_offsets}};
 
     return(wantarray() ? @ids : \@ids);
+
+}
+
+sub length {
+
+    my $self = shift;
+    my $id = shift if (@_);
+
+    return() if (!defined $id || !exists $self->{_lengths}->{$id});
+
+    return($self->{_lengths}->{$id});
 
 }
 

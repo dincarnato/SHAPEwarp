@@ -19,7 +19,7 @@ Danny Incarnato (dincarnato[at]rnaframework.com)<br/>
 
 ## Reference
 
-Morandi *et al*., submitted. SHAPE-guided RNA structure homology search and motif discovery.
+Morandi *et al*., 2022. SHAPE-guided RNA structure homology search and motif discovery. Nature Communications (PMID: [35361788](https://pubmed.ncbi.nlm.nih.gov/35361788/))
 
 
 ## License

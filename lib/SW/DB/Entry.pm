@@ -37,7 +37,7 @@ sub _validate {
     $self->throw("Sequence contains invalid characters") if (defined $self->{sequence} &&
                                                              !isna($self->{sequence}));
     $self->throw("Reactivity must be provided as an ARRAY reference") if (ref($self->{reactivity}) ne "ARRAY");
-    $self->throw("Reactivity data and sequence have different lengths") if (@{$self->{reactivity}} != length($self->{sequence}));
+#    $self->throw("Reactivity data and sequence have different lengths") if (@{$self->{reactivity}} != length($self->{sequence}));
 
 }
 
