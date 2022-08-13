@@ -176,3 +176,214 @@ fn get_chunk_without_offset<T>(index: usize, block_size: usize, data: &[T]) -> &
         .nth(index)
         .expect("chunk index out of bound")
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs::File;
+
+    use rand::rngs::{mock::StepRng, SmallRng};
+
+    use crate::{db_file, SequenceEntry};
+
+    use super::*;
+
+    #[test]
+    fn shuffled_db_with_offset() {
+        const SEED: u64 = 10;
+        const SEQUENCE_LEN: usize = 1553;
+        const BLOCK_SIZE: usize = 13;
+        const SHUFFLE_ITERATIONS: usize = 3;
+        const EXPECTED_OFFSET: usize = 3;
+        // 1 chunk for the initial offset, 1 chunk for the remainder
+        const EXPECTED_CHUNKS: usize = (SEQUENCE_LEN - EXPECTED_OFFSET) / BLOCK_SIZE + 1 + 1;
+        const EXPECTED_SHUFFLED_INDICES: [usize; EXPECTED_CHUNKS] = [
+            43, 65, 15, 119, 37, 68, 48, 104, 110, 28, 70, 88, 18, 55, 50, 103, 4, 114, 49, 67, 83,
+            58, 54, 115, 89, 32, 95, 42, 91, 46, 79, 99, 21, 53, 77, 86, 60, 92, 94, 98, 29, 107,
+            56, 31, 90, 9, 64, 84, 25, 34, 41, 17, 3, 81, 39, 11, 118, 113, 74, 100, 20, 117, 102,
+            22, 97, 62, 75, 111, 57, 72, 76, 112, 87, 96, 2, 106, 35, 36, 7, 13, 12, 51, 82, 40, 1,
+            80, 30, 5, 61, 69, 38, 52, 59, 63, 71, 105, 10, 27, 45, 23, 85, 24, 73, 19, 108, 44,
+            66, 33, 101, 120, 8, 6, 116, 109, 93, 26, 16, 14, 0, 78, 47,
+        ];
+
+        let mut db = db_file::Reader::new(File::open("test_data/test.db").unwrap()).unwrap();
+        let entry = db.entries(1.).next().unwrap().unwrap();
+
+        // Check if we are on the same page
+        let mut rng = SmallRng::seed_from_u64(SEED);
+        assert_eq!(entry.sequence.len(), SEQUENCE_LEN);
+        assert_eq!(
+            entry.sequence[EXPECTED_OFFSET..].chunks(BLOCK_SIZE).count() + 1,
+            EXPECTED_CHUNKS
+        );
+        assert_eq!(
+            rng.gen_range(0..(SEQUENCE_LEN % BLOCK_SIZE)),
+            EXPECTED_OFFSET
+        );
+        let mut indices = Vec::new();
+        super::resize_indices(&mut indices, EXPECTED_CHUNKS);
+        std::iter::repeat(())
+            .take(SHUFFLE_ITERATIONS)
+            .for_each(|()| indices.shuffle(&mut rng));
+        assert_eq!(indices, EXPECTED_SHUFFLED_INDICES);
+        drop(indices);
+
+        let expected_sequence: Vec<_> = EXPECTED_SHUFFLED_INDICES
+            .iter()
+            .copied()
+            .flat_map(|chunk_index| {
+                get_chunk_with_offset(chunk_index, EXPECTED_OFFSET, BLOCK_SIZE, &entry.sequence)
+            })
+            .copied()
+            .collect();
+
+        let expected_reactivity: Vec<_> = EXPECTED_SHUFFLED_INDICES
+            .iter()
+            .copied()
+            .flat_map(|chunk_index| {
+                get_chunk_with_offset(chunk_index, EXPECTED_OFFSET, BLOCK_SIZE, &entry.reactivity)
+            })
+            .copied()
+            .collect();
+
+        let entry_id = entry.id.clone();
+
+        let shuffled_entries = make_shuffled_db_inner(
+            &[entry],
+            BLOCK_SIZE,
+            SHUFFLE_ITERATIONS,
+            SmallRng::seed_from_u64(SEED),
+        );
+
+        assert_eq!(shuffled_entries.len(), 1);
+        let shuffled_entry = shuffled_entries.into_iter().next().unwrap();
+        assert_eq!(shuffled_entry.id, entry_id);
+        assert_eq!(shuffled_entry.sequence, expected_sequence);
+        assert_eq!(shuffled_entry.reactivity(), expected_reactivity);
+    }
+
+    #[test]
+    fn shuffled_db_without_offset() {
+        const SEED: u64 = 9;
+        const SEQUENCE_LEN: usize = 1553;
+        const BLOCK_SIZE: usize = 13;
+        const SHUFFLE_ITERATIONS: usize = 3;
+        // 1 chunk for the remainder
+        const EXPECTED_CHUNKS: usize = SEQUENCE_LEN / BLOCK_SIZE + 1;
+        const EXPECTED_SHUFFLED_INDICES: [usize; EXPECTED_CHUNKS] = [
+            75, 109, 64, 94, 116, 12, 38, 30, 91, 40, 66, 35, 15, 53, 60, 48, 119, 77, 71, 23, 61,
+            68, 99, 9, 16, 93, 83, 115, 84, 62, 26, 37, 107, 88, 117, 95, 6, 56, 113, 19, 20, 70,
+            87, 98, 43, 112, 101, 108, 4, 106, 114, 78, 104, 76, 81, 72, 17, 13, 49, 100, 21, 67,
+            28, 46, 8, 27, 90, 118, 5, 29, 85, 92, 54, 73, 44, 96, 63, 58, 89, 55, 14, 97, 18, 32,
+            103, 86, 80, 31, 36, 69, 3, 59, 65, 50, 0, 110, 7, 102, 22, 42, 82, 24, 10, 111, 57,
+            25, 2, 39, 1, 45, 105, 11, 74, 52, 33, 34, 79, 47, 41, 51,
+        ];
+
+        let mut db = db_file::Reader::new(File::open("test_data/test.db").unwrap()).unwrap();
+        let entry = db.entries(1.).next().unwrap().unwrap();
+
+        // Check if we are on the same page
+        let mut rng = SmallRng::seed_from_u64(SEED);
+        assert_eq!(rng.gen_range(0..(SEQUENCE_LEN % BLOCK_SIZE)), 0);
+        assert_eq!(entry.sequence.len(), SEQUENCE_LEN);
+        assert_eq!(entry.sequence.chunks(BLOCK_SIZE).count(), EXPECTED_CHUNKS);
+        let mut indices = Vec::new();
+        super::resize_indices(&mut indices, EXPECTED_CHUNKS);
+        std::iter::repeat(())
+            .take(SHUFFLE_ITERATIONS)
+            .for_each(|()| indices.shuffle(&mut rng));
+        assert_eq!(indices, EXPECTED_SHUFFLED_INDICES);
+        drop(indices);
+
+        let expected_sequence: Vec<_> = EXPECTED_SHUFFLED_INDICES
+            .iter()
+            .copied()
+            .flat_map(|chunk_index| {
+                get_chunk_without_offset(chunk_index, BLOCK_SIZE, &entry.sequence)
+            })
+            .copied()
+            .collect();
+
+        let expected_reactivity: Vec<_> = EXPECTED_SHUFFLED_INDICES
+            .iter()
+            .copied()
+            .flat_map(|chunk_index| {
+                get_chunk_without_offset(chunk_index, BLOCK_SIZE, &entry.reactivity)
+            })
+            .copied()
+            .collect();
+
+        let entry_id = entry.id.clone();
+
+        let shuffled_entries = make_shuffled_db_inner(
+            &[entry],
+            BLOCK_SIZE,
+            SHUFFLE_ITERATIONS,
+            SmallRng::seed_from_u64(SEED),
+        );
+
+        assert_eq!(shuffled_entries.len(), 1);
+        let shuffled_entry = shuffled_entries.into_iter().next().unwrap();
+        assert_eq!(shuffled_entry.id, entry_id);
+        assert_eq!(shuffled_entry.sequence, expected_sequence);
+        assert_eq!(shuffled_entry.reactivity(), expected_reactivity);
+    }
+
+    #[test]
+    fn chunks_with_zero_offset_no_remainder() {
+        assert_eq!(
+            get_random_offset_and_chunks(30, 5, StepRng::new(0, 0)),
+            (0, 6)
+        );
+    }
+
+    #[test]
+    fn chunks_with_zero_offset_with_remainder() {
+        let rng = StepRng::new(0, 0);
+        assert_eq!(rng.clone().gen_range(0..3), 0);
+        assert_eq!(get_random_offset_and_chunks(33, 5, rng), (0, 7));
+    }
+
+    #[test]
+    fn chunks_with_offset_with_remainder() {
+        let rng = SmallRng::seed_from_u64(0);
+        assert_eq!(rng.clone().gen_range(0..3), 1);
+        assert_eq!(get_random_offset_and_chunks(33, 5, rng), (1, 8));
+    }
+
+    #[test]
+    fn resize_indices() {
+        let mut indices = Vec::new();
+        super::resize_indices(&mut indices, 6);
+        assert_eq!(indices.len(), 6);
+        assert!(indices.iter().copied().enumerate().all(|(a, b)| a == b));
+
+        indices.fill(9999);
+        super::resize_indices(&mut indices, 24);
+        assert_eq!(indices.len(), 24);
+        assert!(indices.iter().copied().enumerate().all(|(a, b)| a == b));
+
+        indices.fill(9999);
+        super::resize_indices(&mut indices, 8);
+        assert_eq!(indices.len(), 8);
+        assert!(indices.iter().copied().enumerate().all(|(a, b)| a == b));
+    }
+
+    #[test]
+    fn chunk_with_offset() {
+        let data: [u32; 13] = std::array::from_fn(|index| index as u32);
+        assert_eq!(get_chunk_with_offset(0, 3, 5, &data), [0, 1, 2]);
+        assert_eq!(get_chunk_with_offset(1, 3, 5, &data), [3, 4, 5, 6, 7]);
+        assert_eq!(get_chunk_with_offset(2, 3, 5, &data), [8, 9, 10, 11, 12]);
+
+        assert_eq!(get_chunk_with_offset(0, 15, 5, &data), []);
+        assert_eq!(get_chunk_with_offset(1, 15, 5, &data), []);
+    }
+
+    #[test]
+    fn chunk_without_offset() {
+        let data: [u32; 9] = std::array::from_fn(|index| index as u32);
+        assert_eq!(get_chunk_without_offset(0, 3, &data), [0, 1, 2]);
+        assert_eq!(get_chunk_without_offset(1, 3, &data), [3, 4, 5]);
+        assert_eq!(get_chunk_without_offset(2, 3, &data), [6, 7, 8]);
+    }
+}

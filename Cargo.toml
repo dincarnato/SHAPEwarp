@@ -18,3 +18,4 @@ thiserror = "1.0.30"
 
 [dev-dependencies]
 approx = { version = "0.4.0", features = ["num-complex"] }
+rand = { version = "0.8.5", features = ["small_rng"] }
