@@ -51,12 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
 
     let query_entries = query_file::read_file(&cli.query, cli.max_reactivity)?;
     let db_entries = db_file::read_file(&cli.database, cli.max_reactivity)?;
-    let db_entries_shuffled = make_shuffled_db(
-        &db_entries,
-        0, /* ? */
-        block_size.into(),
-        shufflings.into(),
-    );
+    let db_entries_shuffled = make_shuffled_db(&db_entries, block_size.into(), shufflings.into());
 
     let mut aligner = Aligner::new(&cli);
     let mut null_all_scores = Vec::new();
