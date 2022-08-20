@@ -13,6 +13,7 @@ ndarray = "0.15.4"
 num-complex = "0.3.1"
 num-traits = "0.2.14"
 rand = "0.8.5"
+serde = { version = "1.0.139", features = ["derive"] }
 smallvec = "1.8.0"
 thiserror = "1.0.30"
 

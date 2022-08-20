@@ -1,9 +1,10 @@
 use clap::{ArgEnum, ArgGroup, Args, Parser};
+use serde::Serialize;
 use std::{fmt, ops::Range, path::PathBuf, str::FromStr};
 
 use crate::{Distance, Reactivity};
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Parser, Serialize)]
 #[clap(
     author,
     version,
@@ -12,10 +13,12 @@ use crate::{Distance, Reactivity};
         ArgGroup::new("fold-opt-group").args(&["fold-query", "eval-align-fold"])
     )
 )]
+#[serde(rename_all = "kebab-case")]
 /// SHAPE-guided RNA structural homology search
 pub struct Cli {
     /// Path to a database folder generated with swBuildDb
     #[clap(long, visible_alias = "db")]
+    #[serde(skip)]
     pub database: PathBuf,
 
     /// Path to the query file
@@ -23,6 +26,7 @@ pub struct Cli {
     /// Note: each entry should contain (one per row) the sequence id, the nucleotide sequence and
     /// a comma-separated list of SHAPE reactivities
     #[clap(short, long)]
+    #[serde(skip)]
     pub query: PathBuf,
 
     /// Output directory
@@ -86,22 +90,27 @@ pub struct Cli {
         flatten,
         next_help_heading = "Folding options (require --fold-query or --eval-align-fold)"
     )]
+    #[serde(flatten)]
     pub folding_args: FoldingArgs,
 
     #[clap(flatten, next_help_heading = "Kmer lookup options")]
+    #[serde(flatten)]
     pub kmer_lookup_args: KmerLookupArgs,
 
     #[clap(flatten, next_help_heading = "Alignment options")]
+    #[serde(flatten)]
     pub alignment_args: AlignmentArgs,
 
     #[clap(
         flatten,
         next_help_heading = r#"Alignment folding evaluation options (see also "Folding options")"#
     )]
+    #[serde(flatten)]
     pub alignment_folding_eval_args: AlignmentFoldingEvaluationArgs,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct FoldingArgs {
     /// Slope for SHAPE reactivities conversion into pseudo-free energy contributions
     #[clap(long, default_value_t = 1.8, requires = "fold-opt-group")]
@@ -136,10 +145,12 @@ pub struct FoldingArgs {
         flatten,
         next_help_heading = "Query folding-specific options (require --fold-query)"
     )]
+    #[serde(flatten)]
     pub query_folding_args: QueryFoldingArgs,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct QueryFoldingArgs {
     /// Size (in nt) of the sliding window for partition function calculation
     #[clap(
@@ -161,10 +172,12 @@ pub struct QueryFoldingArgs {
 
     /// SHAPE reactivity is ignored when folding the query
     #[clap(long = "ignore-react", alias = "ignoreReact", requires = "fold-query")]
+    #[serde(rename = "ignore-react")]
     pub ignore_reactivity: bool,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct KmerLookupArgs {
     /// Minimum number of kmers required to form a High Scoring Group (HSG)
     #[clap(long, default_value_t = 2, alias = "minKmers")]
@@ -215,7 +228,8 @@ pub struct KmerLookupArgs {
     pub kmer_max_match_every_nt: u32,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct AlignmentArgs {
     /// Minimum and maximum score reactivity differences below 0.5 will be mapped to
     #[clap(long, default_value_t = MinMax (-0.5..2.), alias = "alignMatchScore")]
@@ -272,7 +286,8 @@ pub struct AlignmentArgs {
     pub align_seq_mismatch_score: f32,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct AlignmentFoldingEvaluationArgs {
     /// Alignments passing the --inclusion-evalue threshold, are further evaluated for the presence
     /// or a conserved RNA structure by using RNAalifold
@@ -318,6 +333,18 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{},{}", self.0.start, self.0.end)
+    }
+}
+
+impl<T> Serialize for MinMax<T>
+where
+    T: fmt::Display,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_str(self)
     }
 }
 
@@ -371,7 +398,7 @@ where
 
 impl<T> std::error::Error for ParseMinMaxError<T> where T: std::error::Error {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ArgEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ArgEnum, Serialize)]
 pub enum ReportAlignment {
     #[clap(alias = "f")]
     Fasta,

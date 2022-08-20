@@ -31,6 +31,7 @@ use num_complex::Complex;
 use num_traits::{
     cast, float::FloatCore, Float, FromPrimitive, NumAssign, NumAssignRef, NumOps, NumRef, RefNum,
 };
+use serde::Serialize;
 use smallvec::SmallVec;
 
 use crate::cli::Cli;
@@ -653,7 +654,7 @@ where
     Ok(matches)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize)]
 pub enum Distance<T> {
     Integral(T),
     Fractional(f64),
