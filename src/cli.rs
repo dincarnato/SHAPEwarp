@@ -64,10 +64,6 @@ pub struct Cli {
     #[clap(long, default_value_t = 0.1, aliases = &["reportEvalue", "repE"], visible_alias = "rep-e")]
     pub report_evalue: f64,
 
-    /// Besides printing the result summary to screen, matches are reported as a TSV file
-    #[clap(long, alias = "tblOut")]
-    pub output_table: bool,
-
     /// Generates plots of aligned SHAPE reactivity (or probability) profiles
     ///
     /// Note: plots are generated only for matches below the inclusion E-value cutoff
