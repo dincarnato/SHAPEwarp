@@ -47,8 +47,18 @@ impl PartialEq for Cell {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AlignResult {
     pub(crate) query_index: usize,
-    pub(crate) _target_index: usize,
+    pub(crate) target_index: usize,
     pub(crate) score: Reactivity,
+}
+
+pub(crate) struct AlignParams<'a> {
+    pub(crate) query: &'a query_file::Entry,
+    pub(crate) target: &'a db_file::Entry,
+    pub(crate) query_range: RangeInclusive<usize>,
+    pub(crate) target_range: RangeInclusive<usize>,
+    pub(crate) seed_score: Reactivity,
+    pub(crate) align_tolerance: &'a AlignTolerance,
+    pub(crate) direction: Direction,
 }
 
 impl<'a> Aligner<'a> {
@@ -59,30 +69,38 @@ impl<'a> Aligner<'a> {
         }
     }
 
-    pub(crate) fn align(
-        &mut self,
-        query: &query_file::Entry,
-        target: &db_file::Entry,
-        query_range: RangeInclusive<usize>,
-        target_range: RangeInclusive<usize>,
-        seed_score: Reactivity,
-        direction: Direction,
-    ) -> AlignResult {
+    pub(crate) fn align(&mut self, params: AlignParams) -> AlignResult {
+        let AlignParams {
+            query,
+            target,
+            query_range,
+            target_range,
+            seed_score,
+            align_tolerance,
+            direction,
+        } = params;
+
         match direction {
             Direction::Downstream => {
                 let query_len = query.reactivity().len();
                 let target_len = target.reactivity().len();
-                let query =
-                    EntrySlice::forward(query, (*query_range.end() + 1).min(query_len)..query_len);
+
+                let query_start = (*query_range.end() + 1).min(query_len);
+                let target_start = (*target_range.end() + 1).min(target_len);
+                let tolerance = align_tolerance.downstream;
+                let query = EntrySlice::forward(
+                    query,
+                    query_start..query_len.min(query_start.saturating_add(tolerance)),
+                );
                 let target = EntrySlice::forward(
                     target,
-                    (*target_range.end() + 1).min(target_len)..target_len,
+                    target_start..target_len.min(target_start.saturating_add(tolerance)),
                 );
 
                 if query.is_empty() || target.is_empty() {
                     return AlignResult {
                         query_index: *query_range.end(),
-                        _target_index: *target_range.end(),
+                        target_index: *target_range.end(),
                         score: seed_score,
                     };
                 }
@@ -94,19 +112,24 @@ impl<'a> Aligner<'a> {
 
                 AlignResult {
                     query_index,
-                    _target_index: target_index,
+                    target_index,
                     score,
                 }
             }
 
             Direction::Upstream => {
-                let query = EntrySlice::backward(query, 0..(*query_range.start()));
-                let target = EntrySlice::backward(target, 0..(*target_range.start()));
+                let tolerance = align_tolerance.upstream;
+                let query_end = *query_range.start();
+                let target_end = *target_range.start();
+                let query_start = query_end.saturating_sub(tolerance);
+                let target_start = target_end.saturating_sub(tolerance);
+                let query = EntrySlice::backward(query, query_start..query_end);
+                let target = EntrySlice::backward(target, target_start..target_end);
 
                 if query.is_empty() || target.is_empty() {
                     return AlignResult {
                         query_index: query_range.start().saturating_sub(1),
-                        _target_index: target_range.start().saturating_sub(1),
+                        target_index: target_range.start().saturating_sub(1),
                         score: seed_score,
                     };
                 }
@@ -118,7 +141,7 @@ impl<'a> Aligner<'a> {
 
                 AlignResult {
                     query_index,
-                    _target_index: target_index,
+                    target_index,
                     score,
                 }
             }
@@ -622,6 +645,32 @@ impl Default for Traceback {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct AlignTolerance {
+    upstream: usize,
+    downstream: usize,
+}
+
+pub(crate) fn calc_seed_align_tolerance(
+    query_range: RangeInclusive<usize>,
+    target_range: RangeInclusive<usize>,
+    query_len: usize,
+    target_len: usize,
+    align_len_tolerance: f32,
+) -> AlignTolerance {
+    let upstream_len = *query_range.start().min(target_range.start());
+    let downstream_len =
+        (query_len - query_range.end() - 1).min(target_len - target_range.end() - 1);
+    let upstream = upstream_len + (upstream_len as f32 * align_len_tolerance).round() as usize;
+    let downstream =
+        downstream_len + (downstream_len as f32 * align_len_tolerance).round() as usize;
+
+    AlignTolerance {
+        upstream,
+        downstream,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
@@ -1051,27 +1100,65 @@ mod tests {
             .next()
             .unwrap();
 
+        let query = &query;
+        let target = &target;
+        let align_tolerance = AlignTolerance {
+            downstream: 10000,
+            upstream: 10000,
+        };
+        let align_tolerance = &align_tolerance;
+
         let mut aligner = Aligner::new(&cli);
         // None of these must panic
-        aligner.align(
-            &query,
-            &target,
-            0..=query.reactivity().len(),
-            0..=10,
-            10.,
-            Direction::Downstream,
-        );
+        aligner.align(AlignParams {
+            query,
+            target,
+            query_range: (0..=query.reactivity().len()),
+            target_range: 0..=10,
+            seed_score: 10.,
+            align_tolerance,
+            direction: Direction::Downstream,
+        });
 
-        aligner.align(
-            &query,
-            &target,
-            0..=10,
-            0..=target.reactivity().len(),
-            10.,
-            Direction::Downstream,
-        );
+        aligner.align(AlignParams {
+            query,
+            target,
+            query_range: 0..=10,
+            target_range: 0..=target.reactivity().len(),
+            seed_score: 10.,
+            align_tolerance,
+            direction: Direction::Downstream,
+        });
 
-        aligner.align(&query, &target, 0..=20, 10..=20, 10., Direction::Upstream);
-        aligner.align(&query, &target, 10..=20, 0..=20, 10., Direction::Upstream);
+        aligner.align(AlignParams {
+            query,
+            target,
+            query_range: 0..=20,
+            target_range: 10..=20,
+            seed_score: 10.,
+            align_tolerance,
+            direction: Direction::Upstream,
+        });
+        aligner.align(AlignParams {
+            query,
+            target,
+            query_range: 10..=20,
+            target_range: 0..=20,
+            seed_score: 10.,
+            align_tolerance,
+            direction: Direction::Upstream,
+        });
+    }
+
+    #[test]
+    fn seed_align_tolerance() {
+        let tolerance = calc_seed_align_tolerance(36..=39, 21..=24, 51, 101, 0.1);
+        assert_eq!(
+            tolerance,
+            AlignTolerance {
+                upstream: 23,
+                downstream: 12,
+            }
+        )
     }
 }

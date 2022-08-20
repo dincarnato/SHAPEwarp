@@ -1,21 +1,26 @@
 mod aligner;
 mod cli;
 mod db_file;
+mod iter;
 mod mass;
 mod null_model;
+mod query_aligner;
 mod query_file;
 
 use std::{
+    cmp::Reverse,
     fmt::{self, Write},
+    fs::{self, File},
+    io,
     iter::Sum,
-    mem,
     num::ParseFloatError,
-    ops::{Not, RangeInclusive},
-    slice,
+    ops::{self, Not, RangeInclusive},
+    rc::Rc,
     str::FromStr,
 };
 
-use aligner::{Aligner, Direction};
+use aligner::Aligner;
+use anyhow::Context;
 use clap::Parser;
 use cli::{AlignmentFoldingEvaluationArgs, MinMax};
 use fftw::{
@@ -24,6 +29,7 @@ use fftw::{
     types::{Flag, Sign},
 };
 use fnv::FnvHashMap;
+use iter::IterWithRestExt;
 use itertools::Itertools;
 use mass::{ComplexExt, Mass};
 use null_model::*;
@@ -31,12 +37,14 @@ use num_complex::Complex;
 use num_traits::{
     cast, float::FloatCore, Float, FromPrimitive, NumAssign, NumAssignRef, NumOps, NumRef, RefNum,
 };
-use serde::Serialize;
+use query_aligner::{align_query_to_target_db, QueryAlignResult};
+use serde::{Deserialize, Deserializer, Serialize};
 use smallvec::SmallVec;
+use tabled::{Table, Tabled};
 
 use crate::cli::Cli;
 
-fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     let Cli {
@@ -46,272 +54,364 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
                 shufflings,
                 ..
             },
-        inclusion_evalue,
         ..
     } = cli;
+
+    fs::create_dir_all(&cli.output).context("Unable to create output directory")?;
+    write_cli_to_file(&cli)?;
+    let results_path = cli.output.join("results.out");
 
     let query_entries = query_file::read_file(&cli.query, cli.max_reactivity)?;
     let db_entries = db_file::read_file(&cli.database, cli.max_reactivity)?;
     let db_entries_shuffled = make_shuffled_db(&db_entries, block_size.into(), shufflings.into());
 
-    let mut aligner = Aligner::new(&cli);
-    let mut null_all_scores = Vec::new();
-    let mut null_scores = Vec::new();
-    let mut query_all_results = Vec::new();
-    let mut query_results = Vec::new();
-
-    for query_entry in query_entries {
-        let null_aligner = align_query_to_target_db(
-            &query_entry,
-            &db_entries_shuffled,
-            &mut null_all_scores,
-            &cli,
-        )?;
-        null_scores.clear();
-        null_scores.extend(
-            null_aligner
-                .into_iter(&query_all_results, &mut aligner)
-                .take(cli.null_hsgs.try_into().unwrap_or(usize::MAX))
-                .map(|(_, score)| score),
-        );
-        let null_distribution = ExtremeDistribution::from_sample(&null_scores);
-
-        query_results.clear();
-        query_results.extend(
-            align_query_to_target_db(&query_entry, &db_entries, &mut query_all_results, &cli)?
-                .into_iter(&query_all_results, &mut aligner)
-                // FIXME: we need to avoid this clone
-                .map(|(result, score)| {
-                    let p_value = null_distribution.p_value(score);
-                    (result.clone(), score, p_value, 0.)
-                }),
-        );
-
-        let results_len = query_results.len() as f64;
-        query_results.retain_mut(|(_, _, p_value, e_value)| {
-            *e_value = *p_value * results_len;
-            *e_value <= inclusion_evalue
-        });
-
-        // TODO: remove overlapping
-
-        // TODO
-    }
-
-    todo!()
-}
-
-fn align_query_to_target_db<'q, 'db, 'cli>(
-    query_entry: &'q query_file::Entry,
-    db_entries: &'db [db_file::Entry],
-    query_results: &mut Vec<DbEntryMatches<'db>>,
-    cli: &'cli Cli,
-) -> Result<QueryAligner<'q, 'cli>, Box<dyn std::error::Error + Send + Sync + 'static>> {
-    query_results.clear();
-    for db_entry in db_entries {
-        let db_file::Entry {
-            sequence,
-            reactivity,
-            ..
-        } = db_entry;
-
-        let db_data = DbData::new(sequence, reactivity)?;
-        let matching_kmers = get_matching_kmers(
-            query_entry.reactivity(),
-            query_entry.sequence(),
-            &db_data,
-            cli,
-        )?;
-        let grouped = group_matching_kmers(&matching_kmers, cli);
-
-        if grouped.is_empty().not() {
-            query_results.push(DbEntryMatches {
-                db_entry,
-                matches: grouped,
-            });
-        }
-    }
-
-    Ok(QueryAligner { query_entry, cli })
-}
-
-struct QueryAligner<'q, 'cli> {
-    query_entry: &'q query_file::Entry,
-    cli: &'cli Cli,
-}
-
-impl<'q, 'cli> QueryAligner<'q, 'cli> {
-    fn into_iter<'res, 'db, 'aln>(
-        self,
-        query_results: &'res [DbEntryMatches<'db>],
-        aligner: &'aln mut Aligner<'cli>,
-    ) -> QueryAlignIterator<'q, 'db, 'res, 'cli, 'aln> {
-        let Self { query_entry, cli } = self;
-
-        let query_results = query_results.iter();
-        QueryAlignIterator::Empty {
-            query_results,
-            query_entry,
-            cli,
-            aligner,
-        }
-    }
-}
-
-enum QueryAlignIterator<'q, 'db, 'res, 'cli, 'aln> {
-    Empty {
-        query_results: slice::Iter<'res, DbEntryMatches<'db>>,
-        query_entry: &'q query_file::Entry,
-        cli: &'cli Cli,
-        aligner: &'aln mut Aligner<'cli>,
-    },
-    Full {
-        query_results: slice::Iter<'res, DbEntryMatches<'db>>,
-        iter: QueryAlignIteratorInner<'q, 'db, 'res, 'cli, 'aln>,
-        query_entry: &'q query_file::Entry,
-        cli: &'cli Cli,
-    },
-    Finished,
-}
-
-impl<'q, 'db, 'res, 'cli, 'aln> QueryAlignIterator<'q, 'db, 'res, 'cli, 'aln> {
-    fn make_new_iter(&mut self) -> Option<&mut QueryAlignIteratorInner<'q, 'db, 'res, 'cli, 'aln>> {
-        match mem::replace(self, Self::Finished) {
-            Self::Empty {
-                query_results,
+    let mutable_handler_data = query_entries.into_iter().try_fold(
+        MutableHandlerData::new(&cli),
+        |mutable, query_entry| {
+            handle_query_entry(
                 query_entry,
-                cli,
-                aligner,
-            } => self.create_new_state(query_results, query_entry, cli, aligner),
-            Self::Full {
-                query_results,
-                iter,
-                query_entry,
-                cli,
-            } => {
-                let aligner = iter.aligner;
-                self.create_new_state(query_results, query_entry, cli, aligner)
-            }
-            Self::Finished => None,
-        }
-    }
+                HandlerData {
+                    shared: SharedHandlerData {
+                        cli: &cli,
+                        db_entries: &db_entries,
+                        db_entries_shuffled: &db_entries_shuffled,
+                    },
+                    mutable,
+                },
+            )
+        },
+    )?;
 
-    fn create_new_state(
-        &mut self,
-        mut query_results: slice::Iter<'res, DbEntryMatches<'db>>,
-        query_entry: &'q query_file::Entry,
-        cli: &'cli Cli,
-        aligner: &'aln mut Aligner<'cli>,
-    ) -> Option<&mut QueryAlignIteratorInner<'q, 'db, 'res, 'cli, 'aln>> {
-        query_results
+    let mut results = mutable_handler_data.results;
+    results.sort_unstable_by(|a, b| {
+        a.evalue
+            .total_cmp(&b.evalue)
+            .then_with(|| a.query.cmp(&b.query))
+            .then_with(|| a.query_start.cmp(&b.query_start))
+            .then_with(|| a.db_entry.cmp(&b.db_entry))
+            .then_with(|| a.db_start.cmp(&b.db_start))
+    });
+
+    let mut results_writer = {
+        let file = File::create(&results_path).context("Unable to create results.out file")?;
+        create_csv_from_writer(file)
+    };
+    if results.is_empty() {
+        // This is a dirty workaround to make csv write the header
+        use std::io::Write;
+
+        let mut tmp_data = Vec::new();
+        create_csv_from_writer(&mut tmp_data).serialize(QueryResult::new(""))?;
+        let header = tmp_data
+            .splitn(2, |&c| c == b'\n')
             .next()
-            .map(|query_result| {
-                let &DbEntryMatches {
-                    db_entry,
-                    matches: ref db,
-                } = query_result;
+            .expect("CSV should have written at least one line");
+        let mut results_writer = results_writer.into_inner()?;
+        results_writer.write_all(header)?;
+    } else {
+        results
+            .iter()
+            .try_for_each(|result| results_writer.serialize(result))
+            .context("Unable to write to results.out file")?;
 
-                QueryAlignIteratorInner {
-                    aligner,
-                    db_iter: db.iter(),
-                    query_entry,
-                    query_result,
-                    db_entry,
-                    cli,
-                }
-            })
-            .map(move |iter| {
-                *self = Self::Full {
-                    query_results,
-                    iter,
-                    query_entry,
-                    cli,
-                };
-
-                match self {
-                    Self::Full { iter, .. } => iter,
-                    _ => unreachable!(),
-                }
-            })
+        results_writer
+            .flush()
+            .context("Unable to flush results.out file")?;
     }
+
+    // Clear screen and position cursor to row 1, column 1
+    print!("{esc}[2J{esc}[1;1H", esc = 27 as char);
+    println!("{}", Table::new(results));
+
+    Ok(())
 }
 
-impl<'q, 'db, 'res, 'cli, 'aln> Iterator for QueryAlignIterator<'q, 'db, 'res, 'cli, 'aln> {
-    type Item = (&'res DbEntryMatches<'db>, Reactivity);
+#[derive(Clone, Copy, Debug)]
+struct SharedHandlerData<'a> {
+    cli: &'a Cli,
+    db_entries: &'a [db_file::Entry],
+    db_entries_shuffled: &'a [db_file::Entry],
+}
 
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            Self::Empty { .. } => self.make_new_iter()?.next(),
-            Self::Full { iter, .. } => match iter.next() {
-                Some(item) => Some(item),
-                None => self.make_new_iter()?.next(),
-            },
-            Self::Finished { .. } => None,
+struct MutableHandlerData<'a> {
+    aligner: Aligner<'a>,
+    null_all_scores: Vec<DbEntryMatches<'a>>,
+    null_scores: Vec<Reactivity>,
+    query_all_results: Vec<DbEntryMatches<'a>>,
+    reusable_query_results: Vec<(QueryAlignResult<'a>, f64, f64)>,
+    index_to_remove: Vec<usize>,
+    results: Vec<QueryResult>,
+}
+
+impl<'a> MutableHandlerData<'a> {
+    fn new(cli: &'a Cli) -> Self {
+        Self {
+            aligner: Aligner::new(cli),
+            null_all_scores: Default::default(),
+            null_scores: Default::default(),
+            query_all_results: Default::default(),
+            reusable_query_results: Default::default(),
+            index_to_remove: Default::default(),
+            results: Default::default(),
         }
     }
 }
 
-struct QueryAlignIteratorInner<'q, 'db, 'res, 'cli, 'aln> {
-    aligner: &'aln mut Aligner<'cli>,
-    db_iter: slice::Iter<'res, MatchRanges>,
-    query_entry: &'q query_file::Entry,
-    query_result: &'res DbEntryMatches<'db>,
-    db_entry: &'db db_file::Entry,
-    cli: &'cli Cli,
+struct HandlerData<'a> {
+    shared: SharedHandlerData<'a>,
+    mutable: MutableHandlerData<'a>,
 }
 
-impl<'q, 'db, 'res, 'cli, 'aln> Iterator for QueryAlignIteratorInner<'q, 'db, 'res, 'cli, 'aln> {
-    type Item = (&'res DbEntryMatches<'db>, Reactivity);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let &mut Self {
-            ref mut aligner,
-            ref mut db_iter,
-            query_entry,
-            query_result,
-            db_entry,
-            cli,
-        } = self;
-
-        loop {
-            let db = db_iter.next()?;
-            let seed_score = calc_seed_alignment_score(
-                query_entry,
-                db_entry,
-                db.query.clone(),
-                db.db.clone(),
+fn handle_query_entry(
+    query_entry: query_file::Entry,
+    handler_data: HandlerData,
+) -> Result<MutableHandlerData, anyhow::Error> {
+    let HandlerData {
+        shared:
+            SharedHandlerData {
                 cli,
-            );
+                db_entries,
+                db_entries_shuffled,
+            },
+        mutable:
+            MutableHandlerData {
+                mut aligner,
+                mut null_all_scores,
+                mut null_scores,
+                mut query_all_results,
+                mut reusable_query_results,
+                mut index_to_remove,
+                mut results,
+            },
+    } = handler_data;
 
-            if seed_score <= 0. {
-                continue;
-            }
+    let null_aligner =
+        align_query_to_target_db(&query_entry, db_entries_shuffled, &mut null_all_scores, cli)?;
+    null_scores.clear();
+    null_scores.extend(
+        null_aligner
+            .into_iter(&null_all_scores, &mut aligner)
+            .take(cli.null_hsgs.try_into().unwrap_or(usize::MAX))
+            .map(|query_align_result| query_align_result.score),
+    );
+    let null_distribution = ExtremeDistribution::from_sample(&null_scores);
 
-            let MatchRanges { db, query } = db.clone();
+    let mut query_results = reuse_vec(reusable_query_results);
+    query_results.extend(
+        align_query_to_target_db(&query_entry, db_entries, &mut query_all_results, cli)?
+            .into_iter(&*query_all_results, &mut aligner)
+            .map(|result| {
+                let p_value = null_distribution.p_value(result.score);
 
-            let upstream_result = aligner.align(
-                query_entry,
-                db_entry,
-                query.clone(),
-                db.clone(),
-                seed_score,
-                Direction::Upstream,
-            );
+                // FIXME: we need to avoid this clone
+                (result.clone(), p_value, 0.)
+            }),
+    );
 
-            let downstream_result = aligner.align(
-                query_entry,
-                db_entry,
-                query,
-                db,
-                upstream_result.score,
-                Direction::Downstream,
-            );
+    let results_len = query_results.len() as f64;
+    query_results.retain_mut(|(_, p_value, e_value)| {
+        *e_value = *p_value * results_len;
+        *e_value <= cli.report_evalue
+    });
+    remove_overlapping_results(&mut query_results, &mut index_to_remove, cli);
 
-            let aligned_query_len = downstream_result.query_index + 1 - upstream_result.query_index;
-            let score = ((aligned_query_len as f64).ln()
-                / (query_entry.sequence().len() as f64).ln()) as Reactivity;
+    let query = Rc::from(query_entry.name);
+    let results_iter = query_results.iter().map(|&(ref result, pvalue, evalue)| {
+        let &QueryAlignResult {
+            db_entry,
+            ref db_match,
+            score,
+            db: ref db_range,
+            query: ref query_range,
+        } = result;
 
-            break Some((query_result, score));
+        let status = if evalue > cli.report_evalue {
+            QueryResultStatus::NotPass
+        } else if evalue > cli.inclusion_evalue {
+            QueryResultStatus::PassReportEvalue
+        } else {
+            QueryResultStatus::PassInclusionEvalue
+        };
+
+        let db_entry = db_entry.name().to_owned();
+        let query = Rc::clone(&query);
+
+        let query_seed = QueryResultRange(db_match.query.clone());
+        let db_seed = QueryResultRange(db_match.db.clone());
+        let query_start = *query_range.start();
+        let query_end = *query_range.end();
+        let db_start = *db_range.start();
+        let db_end = *db_range.end();
+
+        QueryResult {
+            query,
+            db_entry,
+            query_start,
+            query_end,
+            db_start,
+            db_end,
+            query_seed,
+            db_seed,
+            score,
+            pvalue,
+            evalue,
+            status,
+        }
+    });
+    results.extend(results_iter);
+
+    reusable_query_results = reuse_vec(query_results);
+    Ok(MutableHandlerData {
+        aligner,
+        null_all_scores,
+        null_scores,
+        query_all_results,
+        reusable_query_results,
+        index_to_remove,
+        results,
+    })
+}
+
+// Small hack to reuse vec allocation
+#[inline]
+fn reuse_vec<T, U>(mut v: Vec<T>) -> Vec<U> {
+    assert_eq!(std::mem::size_of::<T>(), std::mem::size_of::<U>());
+    assert_eq!(std::mem::align_of::<T>(), std::mem::align_of::<U>());
+    v.clear();
+    v.into_iter().map(|_| unreachable!()).collect()
+}
+
+#[derive(Debug, Deserialize, Serialize, Tabled)]
+struct QueryResult {
+    #[serde(rename = "Query")]
+    query: Rc<str>,
+
+    #[serde(rename = "DB entry")]
+    db_entry: String,
+
+    #[serde(rename = "Qstart")]
+    query_start: usize,
+
+    #[serde(rename = "Qend")]
+    query_end: usize,
+
+    #[serde(rename = "Dstart")]
+    db_start: usize,
+
+    #[serde(rename = "Dend")]
+    db_end: usize,
+
+    #[serde(rename = "Qseed")]
+    query_seed: QueryResultRange,
+
+    #[serde(rename = "Dseed")]
+    db_seed: QueryResultRange,
+
+    #[serde(rename = "Score")]
+    score: f32,
+
+    #[serde(rename = "P-value")]
+    #[tabled(display_with = "display_scientific")]
+    pvalue: f64,
+
+    #[serde(rename = "E-value")]
+    #[tabled(display_with = "display_scientific")]
+    evalue: f64,
+
+    #[serde(rename = "")]
+    status: QueryResultStatus,
+}
+
+impl QueryResult {
+    fn new(query: impl Into<Rc<str>>) -> Self {
+        let query = query.into();
+        Self {
+            query,
+            db_entry: Default::default(),
+            query_start: Default::default(),
+            query_end: Default::default(),
+            db_start: Default::default(),
+            db_end: Default::default(),
+            query_seed: Default::default(),
+            db_seed: Default::default(),
+            score: Default::default(),
+            pvalue: Default::default(),
+            evalue: Default::default(),
+            status: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct QueryResultRange(ops::RangeInclusive<usize>);
+
+impl Default for QueryResultRange {
+    fn default() -> Self {
+        Self(0..=0)
+    }
+}
+
+impl Serialize for QueryResultRange {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for QueryResultRange {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        let raw = <&str>::deserialize(deserializer)?;
+        let mut split = raw.split('-').map(|x| x.parse());
+        let start = split
+            .next()
+            .ok_or_else(|| Error::custom("missing start in range"))?
+            .map_err(|_| Error::custom("invalid start in range"))?;
+
+        let end = split
+            .next()
+            .ok_or_else(|| Error::custom("missing end in range"))?
+            .map_err(|_| Error::custom("invalid end in range"))?;
+
+        if split.next().is_some() {
+            return Err(Error::custom("invalid range format"));
+        }
+
+        Ok(Self(start..=end))
+    }
+}
+
+impl fmt::Display for QueryResultRange {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}-{}", self.0.start(), self.0.end())
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+enum QueryResultStatus {
+    #[serde(rename = "!")]
+    PassInclusionEvalue,
+
+    #[serde(rename = "?")]
+    PassReportEvalue,
+
+    #[default]
+    #[serde(rename = "")]
+    NotPass,
+}
+
+impl fmt::Display for QueryResultStatus {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::PassInclusionEvalue => f.write_str("!"),
+            Self::PassReportEvalue => f.write_str("?"),
+            Self::NotPass => f.write_str(""),
         }
     }
 }
@@ -765,7 +865,7 @@ pub struct MatchRanges {
     query: RangeInclusive<usize>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DbEntryMatches<'a> {
     db_entry: &'a db_file::Entry,
     matches: Vec<MatchRanges>,
@@ -852,36 +952,89 @@ fn calc_seed_alignment_score(
     seed_score
 }
 
-#[derive(Debug, PartialEq, Eq)]
-struct AlignTolerance {
-    upstream: usize,
-    downstream: usize,
-}
-
-fn calc_seed_align_tolerance(
-    query_range: RangeInclusive<usize>,
-    target_range: RangeInclusive<usize>,
-    query_len: usize,
-    target_len: usize,
-    align_len_tolerance: f32,
-) -> AlignTolerance {
-    let upstream_len = *query_range.start().min(target_range.start());
-    let downstream_len =
-        (query_len - query_range.end() - 1).min(target_len - target_range.end() - 1);
-    let upstream = upstream_len + (upstream_len as f32 * align_len_tolerance).round() as usize;
-    let downstream =
-        downstream_len + (downstream_len as f32 * align_len_tolerance).round() as usize;
-
-    AlignTolerance {
-        upstream,
-        downstream,
-    }
-}
-
 trait SequenceEntry {
     fn name(&self) -> &str;
     fn sequence(&self) -> &[Base];
     fn reactivity(&self) -> &[Reactivity];
+}
+
+fn write_cli_to_file(cli: &Cli) -> anyhow::Result<()> {
+    use io::Write;
+
+    let mut file =
+        File::create(cli.output.join("params.out")).context("Unable to create params.out file")?;
+    file.write_all(&toml::to_vec(cli).context("Unable to convert cli to TOML")?)
+        .context("Unable to write to params.out")?;
+
+    Ok(())
+}
+
+fn remove_overlapping_results(
+    results: &mut Vec<(QueryAlignResult, f64, f64)>,
+    indices_buffer: &mut Vec<usize>,
+    cli: &Cli,
+) {
+    let max_align_overlap: f64 = cli.max_align_overlap.into();
+    indices_buffer.clear();
+    results.sort_unstable_by(|(a, _, _), (b, _, _)| {
+        a.query
+            .start()
+            .cmp(b.query.start())
+            .then(a.query.end().cmp(b.query.end()).reverse())
+    });
+    results
+        .iter_with_rest()
+        .enumerate()
+        .flat_map(|(a_index, (a, rest))| {
+            let a_len = a.0.query_len() as f64;
+            rest.iter()
+                .enumerate()
+                .take_while(move |(_, b)| {
+                    b.0.query.start() < a.0.query.end() && {
+                        let overlap_start = *a.0.query.start().max(b.0.query.start());
+                        let overlap_end = *a.0.query.end().min(b.0.query.end());
+                        let b_len = b.0.query_len() as f64;
+                        (overlap_end + 1).saturating_sub(overlap_start) as f64
+                            > (a_len.min(b_len)) * max_align_overlap
+                    }
+                })
+                .map(move |(b_offset, b)| (a_index, a_index + b_offset + 1, a.2, b.2))
+        })
+        .for_each(|(a_index, b_index, a_evalue, b_evalue)| {
+            if a_evalue <= b_evalue {
+                indices_buffer.push(b_index);
+            } else {
+                indices_buffer.push(a_index);
+            }
+        });
+
+    indices_buffer.sort_unstable_by_key(|&index| Reverse(index));
+
+    if let Some(&first_index) = indices_buffer.first() {
+        results.swap_remove(first_index);
+        indices_buffer
+            .windows(2)
+            .map(|win| [win[0], win[1]])
+            .filter(|[a, b]| a != b)
+            .for_each(|[_, index]| {
+                results.swap_remove(index);
+            });
+    }
+}
+
+fn create_csv_from_writer<W: io::Write>(writer: W) -> csv::Writer<W> {
+    csv::WriterBuilder::new()
+        .delimiter(b'\t')
+        .quote_style(csv::QuoteStyle::Necessary)
+        .from_writer(writer)
+}
+
+fn display_scientific(x: &f64) -> String {
+    if *x >= 0.1 {
+        format!("{x:.3}")
+    } else {
+        format!("{x:.3e}")
+    }
 }
 
 #[cfg(test)]
@@ -2297,14 +2450,98 @@ mod tests {
     }
 
     #[test]
-    fn seed_align_tolerance() {
-        let tolerance = calc_seed_align_tolerance(36..=39, 21..=24, 51, 101, 0.1);
+    fn remove_overlapping_results_empty() {
+        remove_overlapping_results(&mut Vec::new(), &mut vec![1, 2, 3], &dummy_cli());
+    }
+
+    static EMPTY_ENTRY: db_file::Entry = db_file::Entry {
+        id: String::new(),
+        sequence: Vec::new(),
+        reactivity: Vec::new(),
+    };
+    macro_rules! query_result {
+        ($query:expr, $evalue:expr) => {
+            (
+                QueryAlignResult {
+                    db_entry: &EMPTY_ENTRY,
+                    db_match: MatchRanges {
+                        db: 0..=0,
+                        query: 0..=0,
+                    },
+                    score: 0.,
+                    db: 0..=0,
+                    query: $query,
+                },
+                0.0,
+                $evalue,
+            )
+        };
+
+        ($query:expr) => {
+            query_result!($query, 0.)
+        };
+    }
+
+    #[test]
+    fn remove_overlapping_results_non_overlapping() {
+        let mut results = vec![
+            query_result!(0..=4),
+            query_result!(4..=10),
+            query_result!(8..=16),
+        ];
+        let initial_results = results.clone();
+        remove_overlapping_results(&mut results, &mut vec![0, 1, 2, 3, 4], &dummy_cli());
+
+        assert_eq!(results, initial_results);
+    }
+
+    #[test]
+    fn remove_overlapping_results_simple_overlap() {
+        let mut results = vec![query_result!(0..=10, 0.2), query_result!(4..=14, 0.5)];
+        remove_overlapping_results(&mut results, &mut vec![0, 1, 2, 3, 4], &dummy_cli());
+
+        assert_eq!(results, vec![query_result!(0..=10, 0.2)]);
+
+        results = vec![query_result!(0..=10, 0.5), query_result!(4..=14, 0.2)];
+        remove_overlapping_results(&mut results, &mut vec![0, 1, 2, 3, 4], &dummy_cli());
+
+        assert_eq!(results, vec![query_result!(4..=14, 0.2)]);
+    }
+
+    #[test]
+    fn remove_overlapping_results_nested_overlap() {
+        let mut results = vec![query_result!(0..=10, 0.2), query_result!(2..=6, 0.5)];
+        remove_overlapping_results(&mut results, &mut vec![], &dummy_cli());
+
+        assert_eq!(results, vec![query_result!(0..=10, 0.2)]);
+
+        results = vec![query_result!(0..=10, 0.5), query_result!(2..=6, 0.2)];
+        remove_overlapping_results(&mut results, &mut vec![], &dummy_cli());
+
+        assert_eq!(results, vec![query_result!(2..=6, 0.2)]);
+    }
+
+    #[test]
+    fn remove_overlapping_results_chained_overlap() {
+        let mut results = vec![
+            query_result!(0..=5, 0.5),
+            query_result!(2..=8, 0.5),
+            query_result!(4..=10, 0.2),
+            query_result!(6..=12, 0.5),
+            query_result!(8..=14, 0.5),
+            query_result!(10..=16, 0.5),
+        ];
+        remove_overlapping_results(&mut results, &mut vec![], &dummy_cli());
+
+        // The reason for this result is, using the current algorithm:
+        // - the second is removed because this is the current behavior for overlapping sequences
+        //   with the same evalue;
+        // - the third is kept (it removes the second, again) because it has a lower evalue;
+        // - all the others are removed "by chaining" (the first has a higher priority in case of
+        //   equal evalue, but it's been removed by another comparison).
         assert_eq!(
-            tolerance,
-            AlignTolerance {
-                upstream: 23,
-                downstream: 12,
-            }
-        )
+            results,
+            vec![query_result!(0..=5, 0.5), query_result!(4..=10, 0.2)]
+        );
     }
 }

@@ -5,7 +5,9 @@ edition = "2021"
 license = "GPL-3.0-or-later"
 
 [dependencies]
+anyhow = "1.0.58"
 clap = { version = "3.1.12", features = ["derive"] }
+csv = "1.1.6"
 fftw = "0.7.0"
 fnv = "1.0.7"
 itertools = "0.10.3"
@@ -13,9 +15,11 @@ ndarray = "0.15.4"
 num-complex = "0.3.1"
 num-traits = "0.2.14"
 rand = "0.8.5"
-serde = { version = "1.0.139", features = ["derive"] }
+serde = { version = "1.0.139", features = ["derive", "rc"] }
 smallvec = "1.8.0"
+tabled = "0.8.0"
 thiserror = "1.0.30"
+toml = "0.5.9"
 
 [dev-dependencies]
 approx = { version = "0.4.0", features = ["num-complex"] }
