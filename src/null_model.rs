@@ -112,9 +112,11 @@ fn get_random_offset_and_chunks<R: Rng>(
 
 #[derive(Debug)]
 pub(crate) struct ExtremeDistribution {
-    pub(crate) mean: f64,
-    pub(crate) stddev: f64,
+    pub(crate) location: f64,
+    pub(crate) scale: f64,
 }
+
+const EULER_MASCHERONI: f64 = 0.57721566490153286060651209008240243104215933593992;
 
 impl ExtremeDistribution {
     pub(crate) fn from_sample<T>(sample: &[T]) -> Self
@@ -129,28 +131,39 @@ impl ExtremeDistribution {
             .map(|x| cast::<_, f64>(x).unwrap() * len_inv)
             .sum();
 
-        let stddev = sample
+        let variance = sample
             .iter()
             .copied()
             .map(|x| (cast::<_, f64>(x).unwrap() - mean).powi(2))
             .sum::<f64>()
-            .sqrt()
             / (len - 1.);
 
-        Self { mean, stddev }
+        Self::from_mean_and_variance(mean, variance)
     }
 
+    fn from_mean_and_variance(mean: f64, variance: f64) -> Self {
+        use std::f64::consts::PI;
+
+        let scale = (variance * 6. / PI.powi(2)).sqrt();
+        let location = mean - scale * EULER_MASCHERONI;
+
+        Self { location, scale }
+    }
+
+    pub(crate) fn cdf<T>(&self, value: T) -> f64
+    where
+        T: NumCast,
+    {
+        let z = (cast::<_, f64>(value).unwrap() - self.location) / self.scale;
+        f64::exp(-f64::exp(-z))
+    }
+
+    #[inline]
     pub(crate) fn p_value<T>(&self, value: T) -> f64
     where
         T: NumCast,
     {
-        use std::f64::consts::PI;
-
-        const INV_SQRT_6: f64 = 1. / 2.449489742783178;
-        const EULER: f64 = 0.5772156649015329;
-
-        let z_score = (cast::<_, f64>(value).unwrap() - self.mean) / self.stddev;
-        1. - (-(-z_score * PI * INV_SQRT_6 - EULER).exp()).exp()
+        1. - self.cdf(value)
     }
 }
 
