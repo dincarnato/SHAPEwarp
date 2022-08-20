@@ -116,7 +116,7 @@ pub(crate) struct ExtremeDistribution {
     pub(crate) scale: f64,
 }
 
-const EULER_MASCHERONI: f64 = 0.57721566490153286060651209008240243104215933593992;
+const EULER_MASCHERONI: f64 = 0.577_215_664_901_532_9;
 
 impl ExtremeDistribution {
     pub(crate) fn from_sample<T>(sample: &[T]) -> Self
@@ -398,5 +398,45 @@ mod tests {
         assert_eq!(get_chunk_without_offset(0, 3, &data), [0, 1, 2]);
         assert_eq!(get_chunk_without_offset(1, 3, &data), [3, 4, 5]);
         assert_eq!(get_chunk_without_offset(2, 3, &data), [6, 7, 8]);
+    }
+
+    #[test]
+    fn extreme_distribution_from_mean_and_variance() {
+        let dist =
+            ExtremeDistribution::from_mean_and_variance(1.508101930862146, 3.224070771022524);
+        assert!((dist.location - 0.7).abs() < 0.00001);
+        assert!((dist.scale - 1.4).abs() < 0.00001);
+    }
+
+    #[test]
+    fn extreme_distribution_from_sample() {
+        const DATA: [f64; 12] = [1., 2., 3., 4., 4.5, 5., 5.5, 6., 7., 8., 9., 10.];
+        const MEAN: f64 = 5.416666666666667;
+        const VARIANCE: f64 = 7.583333333333334;
+
+        let dist = ExtremeDistribution::from_sample(&DATA);
+        let expected_dist = ExtremeDistribution::from_mean_and_variance(MEAN, VARIANCE);
+        assert!((dist.location - expected_dist.location).abs() < 0.000001);
+        assert!((dist.scale - expected_dist.scale).abs() < 0.000001);
+    }
+
+    #[test]
+    fn extreme_distribution_cdf() {
+        let dist = ExtremeDistribution {
+            location: 0.7,
+            scale: 1.4,
+        };
+
+        assert!((dist.cdf(4.5f64) - 0.9358947464960762).abs() < 0.00000001);
+    }
+
+    #[test]
+    fn extreme_distribution_p_value() {
+        let dist = ExtremeDistribution {
+            location: 0.7,
+            scale: 1.4,
+        };
+
+        assert!((dist.p_value(8f64) - 0.0054235557278387025).abs() < 0.00000001);
     }
 }
