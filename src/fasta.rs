@@ -129,4 +129,32 @@ mod test {
         let written = String::from_utf8(writer).unwrap();
         assert_eq!(written, ">16S_Bsubtilis\nGATCCT\n>16S_750\nCTCAGG\n")
     }
+
+    #[test]
+    fn result_filename() {
+        let query = query_file::read_file(Path::new("./test_data/query.txt"), 1.).unwrap();
+        let db = db_file::read_file(Path::new("./test_data/test.db"), 1.).unwrap();
+        let query_name = query[0].name().into();
+        let db_name = db[0].name().to_owned();
+
+        let query_result = QueryResult {
+            query: query_name,
+            db_entry: db_name,
+            query_start: 5,
+            query_end: 10,
+            db_start: 15,
+            db_end: 20,
+            query_seed: QueryResultRange(0..=10),
+            db_seed: QueryResultRange(0..=10),
+            score: 0.,
+            pvalue: 0.,
+            evalue: 0.,
+            status: QueryResultStatus::PassInclusionEvalue,
+        };
+
+        assert_eq!(
+            super::result_filename(&query_result),
+            "16S_Bsubtilis_15-20_16S_750_5-10.fasta"
+        );
+    }
 }
