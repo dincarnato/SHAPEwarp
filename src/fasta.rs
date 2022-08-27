@@ -26,6 +26,14 @@ pub(crate) fn write_result(
     query_entries: &[query_file::Entry],
     alignments_path: &Path,
 ) -> Result<(), anyhow::Error> {
+    let fasta_path = alignments_path.join(result_filename(result));
+    let file = File::create(fasta_path).context("Unable to create FASTA file")?;
+    let writer = BufWriter::new(file);
+
+    write_result_to_writer(result, db_entries, query_entries, writer)
+}
+
+fn result_filename(result: &QueryResult) -> String {
     let &QueryResult {
         ref query,
         ref db_entry,
@@ -36,16 +44,10 @@ pub(crate) fn write_result(
         ..
     } = result;
 
-    let filename = format!(
+    format!(
         "{}_{}-{}_{}_{}-{}.fasta",
         db_entry, db_start, db_end, query, query_start, query_end
-    );
-
-    let fasta_path = alignments_path.join(filename);
-    let file = File::create(fasta_path).context("Unable to create FASTA file")?;
-    let writer = BufWriter::new(file);
-
-    write_result_to_writer(result, db_entries, query_entries, writer)
+    )
 }
 
 #[inline]
