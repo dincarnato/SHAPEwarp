@@ -70,7 +70,7 @@ pub struct Cli {
     #[clap(long, alias = "makePlot")]
     pub make_plot: bool,
 
-    /// Reports sequence alignments in the specified format ([f]asta or [s]tockholm)
+    /// Reports sequence alignments in the specified format (\[f\]asta or \[s\]tockholm)
     /// Note: alignments are reported only for matches below the inclusion E-value cutoff
     #[clap(long, alias = "reportAln", arg_enum)]
     pub report_alignment: Option<ReportAlignment>,
