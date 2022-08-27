@@ -15,8 +15,8 @@ use std::{
     iter::Sum,
     num::ParseFloatError,
     ops::{self, Not, RangeInclusive},
-    rc::Rc,
     str::FromStr,
+    sync::Arc,
 };
 
 use aligner::Aligner;
@@ -38,6 +38,7 @@ use num_traits::{
     cast, float::FloatCore, Float, FromPrimitive, NumAssign, NumAssignRef, NumOps, NumRef, RefNum,
 };
 use query_aligner::{align_query_to_target_db, QueryAlignResult};
+use rayon::prelude::*;
 use serde::{Deserialize, Deserializer, Serialize};
 use smallvec::SmallVec;
 use tabled::{Table, Tabled};
@@ -54,8 +55,14 @@ fn main() -> anyhow::Result<()> {
                 shufflings,
                 ..
             },
+        threads,
         ..
     } = cli;
+
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(threads.unwrap_or(0).into())
+        .build_global()
+        .context("Unable to create thread pool")?;
 
     fs::create_dir_all(&cli.output).context("Unable to create output directory")?;
     write_cli_to_file(&cli)?;
@@ -65,24 +72,34 @@ fn main() -> anyhow::Result<()> {
     let db_entries = db_file::read_file(&cli.database, cli.max_reactivity)?;
     let db_entries_shuffled = make_shuffled_db(&db_entries, block_size.into(), shufflings.into());
 
-    let mutable_handler_data = query_entries.into_iter().try_fold(
-        MutableHandlerData::new(&cli),
-        |mutable, query_entry| {
-            handle_query_entry(
-                query_entry,
-                HandlerData {
-                    shared: SharedHandlerData {
-                        cli: &cli,
-                        db_entries: &db_entries,
-                        db_entries_shuffled: &db_entries_shuffled,
+    let mut results = query_entries
+        .into_par_iter()
+        .try_fold(
+            || MutableHandlerData::new(&cli),
+            |mutable, query_entry| {
+                handle_query_entry(
+                    query_entry,
+                    HandlerData {
+                        shared: SharedHandlerData {
+                            cli: &cli,
+                            db_entries: &db_entries,
+                            db_entries_shuffled: &db_entries_shuffled,
+                        },
+                        mutable,
                     },
-                    mutable,
-                },
-            )
-        },
-    )?;
+                )
+            },
+        )
+        .map(|mutable_handler_data| {
+            mutable_handler_data.map(|mutable_handler_data| mutable_handler_data.results)
+        })
+        .try_reduce_with(|mut a, b| {
+            a.extend(b);
+            Ok(a)
+        })
+        .transpose()?
+        .unwrap_or_default();
 
-    let mut results = mutable_handler_data.results;
     results.sort_unstable_by(|a, b| {
         a.evalue
             .total_cmp(&b.evalue)
@@ -215,7 +232,7 @@ fn handle_query_entry(
     });
     remove_overlapping_results(&mut query_results, &mut index_to_remove, cli);
 
-    let query = Rc::from(query_entry.name);
+    let query = Arc::from(query_entry.name);
     let results_iter = query_results.iter().map(|&(ref result, pvalue, evalue)| {
         let &QueryAlignResult {
             db_entry,
@@ -234,7 +251,7 @@ fn handle_query_entry(
         };
 
         let db_entry = db_entry.name().to_owned();
-        let query = Rc::clone(&query);
+        let query = Arc::clone(&query);
 
         let query_seed = QueryResultRange(db_match.query.clone());
         let db_seed = QueryResultRange(db_match.db.clone());
@@ -284,7 +301,7 @@ fn reuse_vec<T, U>(mut v: Vec<T>) -> Vec<U> {
 #[derive(Debug, Deserialize, Serialize, Tabled)]
 struct QueryResult {
     #[serde(rename = "Query")]
-    query: Rc<str>,
+    query: Arc<str>,
 
     #[serde(rename = "DB entry")]
     db_entry: String,
@@ -323,7 +340,7 @@ struct QueryResult {
 }
 
 impl QueryResult {
-    fn new(query: impl Into<Rc<str>>) -> Self {
+    fn new(query: impl Into<Arc<str>>) -> Self {
         let query = query.into();
         Self {
             query,
