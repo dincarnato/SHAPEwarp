@@ -1,6 +1,7 @@
 mod aligner;
 mod cli;
 mod db_file;
+mod fasta;
 mod iter;
 mod mass;
 mod null_model;
@@ -43,12 +44,13 @@ use serde::{Deserialize, Deserializer, Serialize};
 use smallvec::SmallVec;
 use tabled::{Table, Tabled};
 
-use crate::cli::Cli;
+use crate::cli::{Cli, ReportAlignment};
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     let Cli {
+        ref output,
         alignment_folding_eval_args:
             AlignmentFoldingEvaluationArgs {
                 block_size,
@@ -56,6 +58,7 @@ fn main() -> anyhow::Result<()> {
                 ..
             },
         threads,
+        report_alignment,
         ..
     } = cli;
 
@@ -64,16 +67,16 @@ fn main() -> anyhow::Result<()> {
         .build_global()
         .context("Unable to create thread pool")?;
 
-    fs::create_dir_all(&cli.output).context("Unable to create output directory")?;
+    fs::create_dir_all(output).context("Unable to create output directory")?;
     write_cli_to_file(&cli)?;
-    let results_path = cli.output.join("results.out");
+    let results_path = output.join("results.out");
 
     let query_entries = query_file::read_file(&cli.query, cli.max_reactivity)?;
     let db_entries = db_file::read_file(&cli.database, cli.max_reactivity)?;
     let db_entries_shuffled = make_shuffled_db(&db_entries, block_size.into(), shufflings.into());
 
     let mut results = query_entries
-        .into_par_iter()
+        .par_iter()
         .try_fold(
             || MutableHandlerData::new(&cli),
             |mutable, query_entry| {
@@ -136,6 +139,24 @@ fn main() -> anyhow::Result<()> {
             .context("Unable to flush results.out file")?;
     }
 
+    if let Some(report_alignment) = report_alignment {
+        let alignments_path = output.join("alignments");
+        fs::create_dir_all(&alignments_path)
+            .context("Unable to create alignments output directory")?;
+
+        match report_alignment {
+            ReportAlignment::Fasta => {
+                results
+                    .iter()
+                    .try_for_each(|result| {
+                        fasta::write_result(result, &db_entries, &query_entries, &alignments_path)
+                    })
+                    .context("Unable to write report alignment in FASTA format")?;
+            }
+            ReportAlignment::Stockholm => todo!("stockholm format is still unimplemented"),
+        }
+    }
+
     // Clear screen and position cursor to row 1, column 1
     print!("{esc}[2J{esc}[1;1H", esc = 27 as char);
     println!("{}", Table::new(results));
@@ -179,9 +200,9 @@ struct HandlerData<'a> {
     mutable: MutableHandlerData<'a>,
 }
 
-fn handle_query_entry(
-    query_entry: query_file::Entry,
-    handler_data: HandlerData,
+fn handle_query_entry<'a>(
+    query_entry: &'a query_file::Entry,
+    handler_data: HandlerData<'a>,
 ) -> Result<MutableHandlerData, anyhow::Error> {
     let HandlerData {
         shared:
@@ -203,7 +224,7 @@ fn handle_query_entry(
     } = handler_data;
 
     let null_aligner =
-        align_query_to_target_db(&query_entry, db_entries_shuffled, &mut null_all_scores, cli)?;
+        align_query_to_target_db(query_entry, db_entries_shuffled, &mut null_all_scores, cli)?;
     null_scores.clear();
     null_scores.extend(
         null_aligner
@@ -215,7 +236,7 @@ fn handle_query_entry(
 
     let mut query_results = reuse_vec(reusable_query_results);
     query_results.extend(
-        align_query_to_target_db(&query_entry, db_entries, &mut query_all_results, cli)?
+        align_query_to_target_db(query_entry, db_entries, &mut query_all_results, cli)?
             .into_iter(&*query_all_results, &mut aligner)
             .map(|result| {
                 let p_value = null_distribution.p_value(result.score);
@@ -232,7 +253,7 @@ fn handle_query_entry(
     });
     remove_overlapping_results(&mut query_results, &mut index_to_remove, cli);
 
-    let query = Arc::from(query_entry.name);
+    let query = Arc::clone(&query_entry.name);
     let results_iter = query_results.iter().map(|&(ref result, pvalue, evalue)| {
         let &QueryAlignResult {
             db_entry,

@@ -3,13 +3,14 @@ use std::{
     io::{self, BufRead, BufReader},
     ops::Not,
     path::Path,
+    sync::Arc,
 };
 
 use crate::{Base, Reactivity, SequenceEntry};
 
 #[derive(Debug)]
 pub struct Entry {
-    pub name: String,
+    pub name: Arc<str>,
     sequence: Vec<Base>,
     reactivities: Vec<Reactivity>,
 }
@@ -95,7 +96,7 @@ where
             continue;
         }
 
-        let name = line.trim().to_string();
+        let name = Arc::from(line.trim().to_string());
 
         file_row += 1;
         line.clear();
@@ -238,14 +239,14 @@ mod tests {
         let entries = read_file_content(Cursor::new(CONTENT), 1.).unwrap();
 
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].name, "test1");
+        assert_eq!(&*entries[0].name, "test1");
         assert_eq!(entries[0].sequence, seq!(A C G T N));
         assert!(reactivities_eq(
             entries[0].reactivities.iter().copied(),
             [0.123, 0.456, 0.789, 1., Reactivity::NAN]
         ));
 
-        assert_eq!(entries[1].name, "test2");
+        assert_eq!(&*entries[1].name, "test2");
         assert_eq!(entries[1].sequence, seq!(N A C G T));
         assert!(reactivities_eq(
             entries[1].reactivities.iter().copied(),
