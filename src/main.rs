@@ -159,7 +159,11 @@ fn main() -> anyhow::Result<()> {
 
     // Clear screen and position cursor to row 1, column 1
     print!("{esc}[2J{esc}[1;1H", esc = 27 as char);
-    println!("{}", Table::new(results).with(tabled::Style::empty()));
+    if results.is_empty() {
+        println!("No match found with current search settings.")
+    } else {
+        println!("{}", Table::new(results).with(tabled::Style::empty()));
+    }
 
     Ok(())
 }
