@@ -1019,17 +1019,20 @@ fn remove_overlapping_results(
     let max_align_overlap: f64 = cli.max_align_overlap.into();
     indices_buffer.clear();
     results.sort_unstable_by(|(a, _, _), (b, _, _)| {
-        a.query
-            .start()
-            .cmp(b.query.start())
+        a.db_entry
+            .id
+            .cmp(&b.db_entry.id)
+            .then(a.query.start().cmp(b.query.start()))
             .then(a.query.end().cmp(b.query.end()).reverse())
     });
     results
         .iter_with_rest()
         .enumerate()
         .flat_map(|(a_index, (a, rest))| {
+            let same_db_index = rest.partition_point(|b| a.0.db_entry.id == b.0.db_entry.id);
             let a_len = a.0.query_len() as f64;
-            rest.iter()
+            rest[..same_db_index]
+                .iter()
                 .enumerate()
                 .take_while(move |(_, b)| {
                     b.0.query.start() < a.0.query.end() && {
@@ -2585,5 +2588,55 @@ mod tests {
             results,
             vec![query_result!(0..=5, 0.5), query_result!(4..=10, 0.2)]
         );
+    }
+
+    #[test]
+    fn keep_targets_with_overlapping_results() {
+        let cli = Cli::dummy();
+
+        let targets: Vec<_> = (0..5)
+            .map(|index| db_file::Entry {
+                id: format!("db_{index}"),
+                sequence: vec![Base::A; 100],
+                reactivity: vec![0.5; 100],
+            })
+            .collect();
+
+        let mut results = targets
+            .iter()
+            .enumerate()
+            .flat_map(|(outer_index, db_entry)| {
+                (0..3).map(move |inner_index| {
+                    let result = QueryAlignResult {
+                        db_entry,
+                        db_match: MatchRanges {
+                            db: 13..=16,
+                            query: 13..=16,
+                        },
+                        score: 15. + (outer_index as f32) * 3. - (inner_index as f32 * 2.),
+                        db: 10..=20,
+                        query: 10..=20,
+                    };
+
+                    let p_value =
+                        outer_index as f64 / 1000. + 0.01 - ((inner_index + 1) as f64 / 10000.);
+
+                    (result, p_value, p_value)
+                })
+            })
+            .collect();
+
+        let mut indices = vec![];
+        remove_overlapping_results(&mut results, &mut indices, &cli);
+
+        assert_eq!(results.len(), targets.len());
+        let mut p_values: Vec<_> = results.into_iter().map(|(_, p_value, _)| p_value).collect();
+        p_values.sort_unstable_by(f64::total_cmp);
+        assert_eq!(
+            p_values,
+            (0..5)
+                .map(|index| index as f64 / 1000. + 0.01 - 0.0003)
+                .collect::<Vec<_>>()
+        )
     }
 }
