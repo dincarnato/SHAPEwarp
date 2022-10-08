@@ -82,11 +82,11 @@ impl SequenceEntry for Entry {
     }
 
     fn sequence(&self) -> &[Base] {
-        &*self.sequence
+        &self.sequence
     }
 
     fn reactivity(&self) -> &[Reactivity] {
-        &*self.reactivity
+        &self.reactivity
     }
 }
 

@@ -241,7 +241,7 @@ fn handle_query_entry<'a>(
     let mut query_results = reuse_vec(reusable_query_results);
     query_results.extend(
         align_query_to_target_db(query_entry, db_entries, &mut query_all_results, cli)?
-            .into_iter(&*query_all_results, &mut aligner)
+            .into_iter(&query_all_results, &mut aligner)
             .map(|result| {
                 let p_value = null_distribution.p_value(result.score);
 
@@ -647,7 +647,7 @@ where
 
     let mut db_transform = AlignedVec::<Complex<T>>::new(ts_len);
     let mut fw_plan: T::Plan = C2CPlan::aligned(&[ts_len], Sign::Forward, Flag::ESTIMATE)?;
-    fw_plan.c2c(&mut *aligned_db, &mut db_transform)?;
+    fw_plan.c2c(&mut aligned_db, &mut db_transform)?;
 
     Ok(db_transform)
 }
@@ -733,7 +733,7 @@ where
                 *dist = Complex::new(dist.norm(), T::zero());
             }
 
-            let (mean_dist, stddev_dist) = mean_stddev::<Complex<T>>(&*complex_distances, 1);
+            let (mean_dist, stddev_dist) = mean_stddev::<Complex<T>>(&complex_distances, 1);
             let max_distance = mean_dist.re - stddev_dist.re * T::from_f32(3.).unwrap();
 
             let kmer_gc_fraction = max_gc_diff.is_some().then(|| {

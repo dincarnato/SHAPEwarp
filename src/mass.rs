@@ -67,7 +67,7 @@ where
             .zip(self.aligned_query.iter_mut())
             .for_each(|(q, y)| y.re = q);
         self.fw_plan
-            .c2c(&mut *self.aligned_query, &mut self.query_transform)?;
+            .c2c(&mut self.aligned_query, &mut self.query_transform)?;
 
         self.product
             .iter_mut()
@@ -76,7 +76,7 @@ where
             .for_each(|((z, x), y)| *z = x * y);
 
         self.bw_plan
-            .c2c(&mut *self.product, &mut *self.product_inverse)?;
+            .c2c(&mut self.product, &mut self.product_inverse)?;
 
         // Normalize results
         let scale_factor: T = T::one() / cast::<_, T>(ts_len).unwrap();
