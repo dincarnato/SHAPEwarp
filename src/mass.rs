@@ -88,8 +88,11 @@ where
         let (mean_y, sigma_y) = mean_stddev(query, 0);
 
         let query_len_float: T = cast(query_len).unwrap();
-        Ok(self.product_inverse[query_len - 1..ts_len]
+        Ok(self
+            .product_inverse
             .iter()
+            .skip(query_len - 1)
+            .take(ts_len.saturating_sub(query_len - 1))
             .zip(mean_sigma_x)
             .map(|(z, (mean_x, sigma_x))| {
                 let squared = T::from_f64(2.).unwrap()
