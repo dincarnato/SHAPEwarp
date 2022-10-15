@@ -651,7 +651,8 @@ sub align {
         if ($aln) {
 
             # Updates the score with score adjusted by query coverage
-            $aln->score($aln->score() * log(scalar($aln->query())) / log(length($querySeq)));# / log(scalar(@{$queryReact})));
+            my @queryGaps = $aln->queryGaps();
+            $aln->score($aln->score() * log(scalar($aln->query()) - @queryGaps) / log(length($querySeq)));# / log(scalar(@{$queryReact})));
             $aln->dbId($id);
 
             push(@alignments, $aln);
