@@ -11,7 +11,8 @@ use crate::{Distance, Reactivity};
     about,
     group(
         ArgGroup::new("fold-opt-group").args(&["fold-query", "eval-align-fold"])
-    )
+    ),
+    allow_negative_numbers = true,
 )]
 #[serde(rename_all = "kebab-case")]
 /// SHAPE-guided RNA structural homology search
