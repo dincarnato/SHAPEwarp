@@ -8,11 +8,21 @@ use std::{
 
 use crate::{Base, Reactivity, SequenceEntry};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Entry {
     pub name: Arc<str>,
     sequence: Vec<Base>,
     reactivities: Vec<Reactivity>,
+}
+
+impl Entry {
+    pub fn cap_reactivities(&mut self, max_reactivity: Reactivity) {
+        self.reactivities.iter_mut().for_each(|reactivity| {
+            if reactivity.is_nan().not() {
+                *reactivity = reactivity.min(max_reactivity)
+            }
+        });
+    }
 }
 
 impl SequenceEntry for Entry {
@@ -72,12 +82,12 @@ pub struct UnmatchedLengths {
 }
 
 #[inline]
-pub fn read_file(path: &Path, max_reactivity: Reactivity) -> Result<Vec<Entry>, Error> {
+pub fn read_file(path: &Path) -> Result<Vec<Entry>, Error> {
     let reader = BufReader::new(File::open(path).map_err(Box::new)?);
-    read_file_content(reader, max_reactivity)
+    read_file_content(reader)
 }
 
-fn read_file_content<R>(mut reader: R, max_reactivity: Reactivity) -> Result<Vec<Entry>, Error>
+fn read_file_content<R>(mut reader: R) -> Result<Vec<Entry>, Error>
 where
     R: BufRead,
 {
@@ -143,15 +153,12 @@ where
                 let reactivity = if raw_reactivity.eq_ignore_ascii_case("NaN") {
                     Reactivity::NAN
                 } else {
-                    raw_reactivity
-                        .parse::<Reactivity>()
-                        .map_err(|_| {
-                            Error::InvalidReactivity(Box::new(RowColumn {
-                                row: file_row,
-                                column,
-                            }))
-                        })?
-                        .min(max_reactivity)
+                    raw_reactivity.parse::<Reactivity>().map_err(|_| {
+                        Error::InvalidReactivity(Box::new(RowColumn {
+                            row: file_row,
+                            column,
+                        }))
+                    })?
                 };
 
                 column += raw_reactivity.len();
@@ -236,28 +243,28 @@ mod tests {
     #[test]
     fn read_valid_file() {
         const CONTENT: &str = include_str!("../test_data/valid_query.txt");
-        let entries = read_file_content(Cursor::new(CONTENT), 1.).unwrap();
+        let entries = read_file_content(Cursor::new(CONTENT)).unwrap();
 
         assert_eq!(entries.len(), 2);
         assert_eq!(&*entries[0].name, "test1");
         assert_eq!(entries[0].sequence, seq!(A C G T N));
         assert!(reactivities_eq(
             entries[0].reactivities.iter().copied(),
-            [0.123, 0.456, 0.789, 1., Reactivity::NAN]
+            [0.123, 0.456, 0.789, 1.234, Reactivity::NAN]
         ));
 
         assert_eq!(&*entries[1].name, "test2");
         assert_eq!(entries[1].sequence, seq!(N A C G T));
         assert!(reactivities_eq(
             entries[1].reactivities.iter().copied(),
-            [Reactivity::NAN, 1., 0.456, 0.789, 0.012]
+            [Reactivity::NAN, 12., 0.456, 0.789, 0.012]
         ));
     }
 
     #[test]
     fn empty_sequence() {
         const CONTENT: &str = include_str!("../test_data/query_empty_sequence.txt");
-        let err = read_file_content(Cursor::new(CONTENT), 1.).unwrap_err();
+        let err = read_file_content(Cursor::new(CONTENT)).unwrap_err();
 
         assert!(matches!(err, Error::EmptySequence(6)));
     }
@@ -265,7 +272,7 @@ mod tests {
     #[test]
     fn truncated_sequence() {
         const CONTENT: &str = include_str!("../test_data/query_truncated_sequence.txt");
-        let err = read_file_content(Cursor::new(CONTENT), 1.).unwrap_err();
+        let err = read_file_content(Cursor::new(CONTENT)).unwrap_err();
 
         assert!(matches!(err, Error::TruncatedExpectedSequence));
     }
@@ -273,7 +280,7 @@ mod tests {
     #[test]
     fn truncated_reactivities() {
         const CONTENT: &str = include_str!("../test_data/query_truncated_reactivities.txt");
-        let err = read_file_content(Cursor::new(CONTENT), 1.).unwrap_err();
+        let err = read_file_content(Cursor::new(CONTENT)).unwrap_err();
 
         assert!(matches!(err, Error::TruncatedExpectedReactivities));
     }
@@ -281,7 +288,7 @@ mod tests {
     #[test]
     fn invalid_sequence_base() {
         const CONTENT: &str = include_str!("../test_data/query_invalid_base.txt");
-        let err = read_file_content(Cursor::new(CONTENT), 1.).unwrap_err();
+        let err = read_file_content(Cursor::new(CONTENT)).unwrap_err();
 
         match err {
             Error::InvalidSequenceBase(err) => assert_eq!(*err, RowColumn { row: 6, column: 3 }),
@@ -292,7 +299,7 @@ mod tests {
     #[test]
     fn invalid_sequence_reactivity() {
         const CONTENT: &str = include_str!("../test_data/query_invalid_reactivity.txt");
-        let err = read_file_content(Cursor::new(CONTENT), 1.).unwrap_err();
+        let err = read_file_content(Cursor::new(CONTENT)).unwrap_err();
 
         match err {
             Error::InvalidReactivity(err) => assert_eq!(*err, RowColumn { row: 7, column: 11 }),
@@ -303,7 +310,7 @@ mod tests {
     #[test]
     fn invalid_lengths() {
         const CONTENT: &str = include_str!("../test_data/query_invalid_lengths.txt");
-        let err = read_file_content(Cursor::new(CONTENT), 1.).unwrap_err();
+        let err = read_file_content(Cursor::new(CONTENT)).unwrap_err();
 
         match err {
             Error::UnmatchedLengths(err) => assert_eq!(
@@ -316,5 +323,25 @@ mod tests {
             ),
             _ => panic!(),
         }
+    }
+
+    #[test]
+    fn cap_reactivities() {
+        const CONTENT: &str = include_str!("../test_data/valid_query.txt");
+        let mut entries = read_file_content(Cursor::new(CONTENT)).unwrap();
+        entries
+            .iter_mut()
+            .for_each(|entry| entry.cap_reactivities(1.));
+
+        dbg!(&entries);
+        assert!(reactivities_eq(
+            entries[0].reactivities.iter().copied(),
+            [0.123, 0.456, 0.789, 1., Reactivity::NAN]
+        ));
+
+        assert!(reactivities_eq(
+            entries[1].reactivities.iter().copied(),
+            [Reactivity::NAN, 1., 0.456, 0.789, 0.012]
+        ));
     }
 }

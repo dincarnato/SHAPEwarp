@@ -1079,9 +1079,9 @@ mod tests {
         const SEED_SCORE: Reactivity = 93.77;
 
         let query_slice = 80..;
-        let query =
-            query_file::read_file(Path::new("./test_data/query.txt"), cli.max_reactivity).unwrap();
-        let query = query.into_iter().next().unwrap();
+        let query = query_file::read_file(Path::new("./test_data/query.txt")).unwrap();
+        let mut query = query.into_iter().next().unwrap();
+        query.cap_reactivities(cli.max_reactivity);
         let query_sequence = &query.sequence()[query_slice.clone()];
         let query_reactivity = &query.reactivity()[query_slice];
         let query = EntrySlice::<true> {
@@ -1089,9 +1089,9 @@ mod tests {
             reactivity: query_reactivity,
         };
 
-        let target =
-            db_file::read_file(Path::new("./test_data/test.db"), cli.max_reactivity).unwrap();
-        let target = target.into_iter().next().unwrap();
+        let target = db_file::read_file(Path::new("./test_data/test.db")).unwrap();
+        let mut target = target.into_iter().next().unwrap();
+        target.cap_reactivities(cli.max_reactivity);
         let target_slice = 838..;
         let target_sequence = &target.sequence()[target_slice.clone()];
         let target_reactivity = &target.reactivity()[target_slice];
@@ -1159,9 +1159,9 @@ mod tests {
         const SEED_SCORE: Reactivity = 81.54;
 
         let query_slice = 0..15;
-        let query =
-            query_file::read_file(Path::new("./test_data/query.txt"), cli.max_reactivity).unwrap();
-        let query = query.into_iter().next().unwrap();
+        let query = query_file::read_file(Path::new("./test_data/query.txt")).unwrap();
+        let mut query = query.into_iter().next().unwrap();
+        query.cap_reactivities(cli.max_reactivity);
         let query_sequence = &query.sequence()[query_slice.clone()];
         let query_reactivity = &query.reactivity()[query_slice];
         let query = EntrySlice::<false> {
@@ -1169,9 +1169,9 @@ mod tests {
             reactivity: query_reactivity,
         };
 
-        let target =
-            db_file::read_file(Path::new("./test_data/test.db"), cli.max_reactivity).unwrap();
-        let target = target.into_iter().next().unwrap();
+        let target = db_file::read_file(Path::new("./test_data/test.db")).unwrap();
+        let mut target = target.into_iter().next().unwrap();
+        target.cap_reactivities(cli.max_reactivity);
         let target_slice = ..773;
         let target_sequence = &target.sequence()[target_slice];
         let target_reactivity = &target.reactivity()[target_slice];
@@ -1232,12 +1232,12 @@ mod tests {
     #[test]
     fn align_empty_range() {
         let cli = Cli::dummy();
-        let query = query_file::read_file(Path::new("./test_data/query.txt"), cli.max_reactivity)
+        let query = query_file::read_file(Path::new("./test_data/query.txt"))
             .unwrap()
             .into_iter()
             .next()
             .unwrap();
-        let target = db_file::read_file(Path::new("./test_data/test.db"), cli.max_reactivity)
+        let target = db_file::read_file(Path::new("./test_data/test.db"))
             .unwrap()
             .into_iter()
             .next()

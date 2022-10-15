@@ -84,8 +84,27 @@ fn main() -> anyhow::Result<()> {
     write_cli_to_file(&cli)?;
     let results_path = output.join("results.out");
 
-    let query_entries = query_file::read_file(&cli.query, cli.max_reactivity)?;
-    let db_entries = db_file::read_file(&cli.database, cli.max_reactivity)?;
+    let query_entries_orig = query_file::read_file(&cli.query)?;
+    let db_entries_orig = db_file::read_file(&cli.database)?;
+
+    let query_entries: Vec<_> = query_entries_orig
+        .iter()
+        .map(|entry| {
+            let mut entry = entry.clone();
+            entry.cap_reactivities(cli.max_reactivity);
+            entry
+        })
+        .collect();
+
+    let db_entries: Vec<_> = db_entries_orig
+        .iter()
+        .map(|entry| {
+            let mut entry = entry.clone();
+            entry.cap_reactivities(cli.max_reactivity);
+            entry
+        })
+        .collect();
+
     let db_entries_shuffled = make_shuffled_db(&db_entries, block_size.into(), shufflings.into());
 
     let mut results = query_entries

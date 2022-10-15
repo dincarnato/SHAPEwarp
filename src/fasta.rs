@@ -127,8 +127,8 @@ mod test {
 
     #[test]
     fn write_result() {
-        let query = query_file::read_file(Path::new("./test_data/query.txt"), 1.).unwrap();
-        let db = db_file::read_file(Path::new("./test_data/test.db"), 1.).unwrap();
+        let query = query_file::read_file(Path::new("./test_data/query.txt")).unwrap();
+        let db = db_file::read_file(Path::new("./test_data/test.db")).unwrap();
         let query_name = query[0].name().into();
         let db_name = db[0].name().to_owned();
 
@@ -156,8 +156,8 @@ mod test {
 
     #[test]
     fn result_filename() {
-        let query = query_file::read_file(Path::new("./test_data/query.txt"), 1.).unwrap();
-        let db = db_file::read_file(Path::new("./test_data/test.db"), 1.).unwrap();
+        let query = query_file::read_file(Path::new("./test_data/query.txt")).unwrap();
+        let db = db_file::read_file(Path::new("./test_data/test.db")).unwrap();
         let query_name = query[0].name().into();
         let db_name = db[0].name().to_owned();
 

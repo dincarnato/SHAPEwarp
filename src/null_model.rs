@@ -236,7 +236,7 @@ mod tests {
         ];
 
         let mut db = db_file::Reader::new(File::open("test_data/test.db").unwrap()).unwrap();
-        let entry = db.entries(1.).next().unwrap().unwrap();
+        let entry = db.entries().next().unwrap().unwrap();
 
         // Check if we are on the same page
         let mut rng = SmallRng::seed_from_u64(SEED);
@@ -309,7 +309,7 @@ mod tests {
         ];
 
         let mut db = db_file::Reader::new(File::open("test_data/test.db").unwrap()).unwrap();
-        let entry = db.entries(1.).next().unwrap().unwrap();
+        let entry = db.entries().next().unwrap().unwrap();
 
         // Check if we are on the same page
         let mut rng = SmallRng::seed_from_u64(SEED);
