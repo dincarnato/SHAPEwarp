@@ -7,16 +7,36 @@ use std::{
 
 use anyhow::Context;
 
-use crate::{db_file, query_file, QueryResult, Sequence, SequenceEntry};
+use crate::{
+    aligner::{AlignedSequence, BaseOrGap},
+    db_file, query_file, QueryResult, Sequence, SequenceEntry,
+};
 
 pub(crate) struct Entry<'a> {
     pub(crate) description: &'a str,
     pub(crate) sequence: Sequence<'a>,
+    pub(crate) alignment: Option<&'a AlignedSequence>,
 }
 
 impl fmt::Display for Entry<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, ">{}\n{}", self.description, self.sequence)
+        writeln!(f, ">{}", self.description)?;
+        match self.alignment {
+            Some(alignment) => {
+                let mut sequence = self.sequence.0.iter();
+                for base_or_gap in &alignment.0 {
+                    match base_or_gap {
+                        BaseOrGap::Base => match sequence.next() {
+                            Some(base) => write!(f, "{}", base)?,
+                            None => break,
+                        },
+                        BaseOrGap::Gap => f.write_str("-")?,
+                    }
+                }
+                sequence.try_for_each(|base| write!(f, "{}", base))
+            }
+            None => write!(f, "{}", self.sequence),
+        }
     }
 }
 
@@ -64,6 +84,7 @@ fn write_result_to_writer<W: io::Write>(
         query_end,
         db_start,
         db_end,
+        ref alignment,
         ..
     } = result;
 
@@ -84,11 +105,13 @@ fn write_result_to_writer<W: io::Write>(
         "{}\n{}",
         Entry {
             description: db_entry.name(),
-            sequence: db_sequence
+            sequence: db_sequence,
+            alignment: Some(&alignment.target),
         },
         Entry {
             description: query_entry.name(),
-            sequence: query_sequence
+            sequence: query_sequence,
+            alignment: Some(&alignment.query),
         }
     )
     .context("Unable to write to FASTA file")?;
@@ -98,7 +121,7 @@ fn write_result_to_writer<W: io::Write>(
 
 #[cfg(test)]
 mod test {
-    use crate::{QueryResultRange, QueryResultStatus};
+    use crate::{aligner::BaseOrGap, QueryResultRange, QueryResultStatus};
 
     use super::*;
 
@@ -122,6 +145,7 @@ mod test {
             pvalue: 0.,
             evalue: 0.,
             status: QueryResultStatus::PassInclusionEvalue,
+            alignment: Default::default(),
         };
 
         let mut writer = vec![];
@@ -150,11 +174,27 @@ mod test {
             pvalue: 0.,
             evalue: 0.,
             status: QueryResultStatus::PassInclusionEvalue,
+            alignment: Default::default(),
         };
 
         assert_eq!(
             super::result_filename(&query_result),
             "16S_Bsubtilis_15-20_16S_750_5-10.fasta"
         );
+    }
+
+    #[test]
+    fn display_aligned_entry() {
+        use crate::Base::*;
+        use BaseOrGap::*;
+
+        let alignment = AlignedSequence(vec![Base, Base, Gap, Base, Gap, Gap, Base]);
+        let entry = Entry {
+            description: "test",
+            sequence: Sequence(&[A, C, T, G, A, A]),
+            alignment: Some(&alignment),
+        };
+
+        assert_eq!(entry.to_string(), ">test\nAC-T--GAA");
     }
 }

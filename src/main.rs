@@ -20,7 +20,7 @@ use std::{
     sync::Arc,
 };
 
-use aligner::Aligner;
+use aligner::{AlignedSequence, Aligner, AlignmentResult, NoOpBehavior};
 use anyhow::Context;
 use clap::Parser;
 use cli::{AlignmentFoldingEvaluationArgs, MinMax};
@@ -44,7 +44,10 @@ use serde::{Deserialize, Deserializer, Serialize};
 use smallvec::SmallVec;
 use tabled::{Table, Tabled};
 
-use crate::cli::{Cli, ReportAlignment};
+use crate::{
+    aligner::BacktrackBehavior,
+    cli::{Cli, ReportAlignment},
+};
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -180,7 +183,7 @@ struct MutableHandlerData<'a> {
     null_all_scores: Vec<DbEntryMatches<'a>>,
     null_scores: Vec<Reactivity>,
     query_all_results: Vec<DbEntryMatches<'a>>,
-    reusable_query_results: Vec<(QueryAlignResult<'a>, f64, f64)>,
+    reusable_query_results: Vec<(QueryAlignResult<'a, AlignedSequence>, f64, f64)>,
     index_to_remove: Vec<usize>,
     results: Vec<QueryResult>,
 }
@@ -227,8 +230,12 @@ fn handle_query_entry<'a>(
             },
     } = handler_data;
 
-    let null_aligner =
-        align_query_to_target_db(query_entry, db_entries_shuffled, &mut null_all_scores, cli)?;
+    let null_aligner = align_query_to_target_db::<NoOpBehavior>(
+        query_entry,
+        db_entries_shuffled,
+        &mut null_all_scores,
+        cli,
+    )?;
     null_scores.clear();
     null_scores.extend(
         null_aligner
@@ -240,14 +247,19 @@ fn handle_query_entry<'a>(
 
     let mut query_results = reuse_vec(reusable_query_results);
     query_results.extend(
-        align_query_to_target_db(query_entry, db_entries, &mut query_all_results, cli)?
-            .into_iter(&query_all_results, &mut aligner)
-            .map(|result| {
-                let p_value = null_distribution.p_value(result.score);
+        align_query_to_target_db::<BacktrackBehavior>(
+            query_entry,
+            db_entries,
+            &mut query_all_results,
+            cli,
+        )?
+        .into_iter(&query_all_results, &mut aligner)
+        .map(|result| {
+            let p_value = null_distribution.p_value(result.score);
 
-                // FIXME: we need to avoid this clone
-                (result.clone(), p_value, 0.)
-            }),
+            // FIXME: we need to avoid this clone
+            (result.clone(), p_value, 0.)
+        }),
     );
 
     let results_len = query_results.len() as f64;
@@ -265,6 +277,7 @@ fn handle_query_entry<'a>(
             score,
             db: ref db_range,
             query: ref query_range,
+            ref alignment,
         } = result;
 
         let status = if evalue > cli.report_evalue {
@@ -277,6 +290,7 @@ fn handle_query_entry<'a>(
 
         let db_entry = db_entry.name().to_owned();
         let query = Arc::clone(&query);
+        let alignment = Arc::clone(alignment);
 
         let query_seed = QueryResultRange(db_match.query.clone());
         let db_seed = QueryResultRange(db_match.db.clone());
@@ -298,6 +312,7 @@ fn handle_query_entry<'a>(
             pvalue,
             evalue,
             status,
+            alignment,
         }
     });
     results.extend(results_iter);
@@ -362,6 +377,10 @@ struct QueryResult {
 
     #[serde(rename = "")]
     status: QueryResultStatus,
+
+    #[serde(skip)]
+    #[tabled(skip)]
+    alignment: Arc<AlignmentResult<AlignedSequence>>,
 }
 
 impl QueryResult {
@@ -380,6 +399,7 @@ impl QueryResult {
             pvalue: Default::default(),
             evalue: Default::default(),
             status: Default::default(),
+            alignment: Default::default(),
         }
     }
 }
@@ -1012,7 +1032,7 @@ fn write_cli_to_file(cli: &Cli) -> anyhow::Result<()> {
 }
 
 fn remove_overlapping_results(
-    results: &mut Vec<(QueryAlignResult, f64, f64)>,
+    results: &mut Vec<(QueryAlignResult<'_, AlignedSequence>, f64, f64)>,
     indices_buffer: &mut Vec<usize>,
     cli: &Cli,
 ) {
@@ -1085,6 +1105,8 @@ fn display_scientific(x: &f64) -> String {
 #[cfg(test)]
 mod tests {
     use approx::{assert_abs_diff_eq, assert_relative_eq};
+
+    use crate::aligner::BaseOrGap;
 
     use super::*;
 
@@ -2516,6 +2538,7 @@ mod tests {
                     score: 0.,
                     db: 0..=0,
                     query: $query,
+                    alignment: Default::default(),
                 },
                 0.0,
                 $evalue,
@@ -2602,6 +2625,11 @@ mod tests {
             })
             .collect();
 
+        let alignment_result = Arc::new(AlignmentResult {
+            query: AlignedSequence(vec![BaseOrGap::Base; 4]),
+            target: AlignedSequence(vec![BaseOrGap::Base; 4]),
+        });
+        let alignment_result = &alignment_result;
         let mut results = targets
             .iter()
             .enumerate()
@@ -2616,6 +2644,7 @@ mod tests {
                         score: 15. + (outer_index as f32) * 3. - (inner_index as f32 * 2.),
                         db: 10..=20,
                         query: 10..=20,
+                        alignment: Arc::clone(alignment_result),
                     };
 
                     let p_value =

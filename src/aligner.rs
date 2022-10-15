@@ -1,5 +1,6 @@
 use std::{
     cmp, iter,
+    num::NonZeroUsize,
     ops::{ControlFlow, Not, Range, RangeInclusive},
     slice::{self, SliceIndex},
 };
@@ -45,9 +46,11 @@ impl PartialEq for Cell {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct AlignResult {
+pub(crate) struct AlignResult<Alignment> {
     pub(crate) query_index: usize,
+    pub(crate) query_alignment: Alignment,
     pub(crate) target_index: usize,
+    pub(crate) target_alignment: Alignment,
     pub(crate) score: Reactivity,
 }
 
@@ -61,6 +64,126 @@ pub(crate) struct AlignParams<'a> {
     pub(crate) direction: Direction,
 }
 
+#[derive(Debug, Default, Clone, PartialEq)]
+pub(crate) struct AlignmentResult<Alignment> {
+    pub(crate) query: Alignment,
+    pub(crate) target: Alignment,
+}
+
+pub(crate) trait AlignBehavior {
+    type Alignment: Default;
+
+    fn get_alignment<const FORWARD: bool>(
+        matrix: &Array2<Cell>,
+        best_cell: [usize; 2],
+    ) -> AlignmentResult<Self::Alignment>;
+
+    fn merge_upstream_downstream(
+        upstream: Self::Alignment,
+        downstream: Self::Alignment,
+        seed_size: NonZeroUsize,
+    ) -> Self::Alignment;
+}
+
+pub(crate) struct NoOpBehavior;
+pub(crate) struct BacktrackBehavior;
+
+impl AlignBehavior for NoOpBehavior {
+    type Alignment = ();
+
+    #[inline]
+    fn get_alignment<const FORWARD: bool>(
+        _matrix: &Array2<Cell>,
+        _best_cell: [usize; 2],
+    ) -> AlignmentResult<Self::Alignment> {
+        AlignmentResult {
+            query: (),
+            target: (),
+        }
+    }
+
+    #[inline(always)]
+    fn merge_upstream_downstream(
+        _upstream: Self::Alignment,
+        _downstream: Self::Alignment,
+        _seed_size: NonZeroUsize,
+    ) -> Self::Alignment {
+    }
+}
+
+impl AlignBehavior for BacktrackBehavior {
+    type Alignment = AlignedSequence;
+
+    fn get_alignment<const FORWARD: bool>(
+        matrix: &Array2<Cell>,
+        best_cell: [usize; 2],
+    ) -> AlignmentResult<Self::Alignment> {
+        let inner = || {
+            assert!(best_cell[0] < matrix.nrows());
+            assert!(best_cell[1] < matrix.ncols());
+
+            let mut target = vec![];
+            let mut query = vec![];
+
+            let mut cell = best_cell;
+            while cell != [0, 0] {
+                let cell_data = &matrix[cell];
+                let t;
+                let q;
+                ([t, q], cell) = match cell_data.traceback {
+                    Traceback::Diagonal => ([BaseOrGap::Base; 2], [cell[0] - 1, cell[1] - 1]),
+                    Traceback::Left => ([BaseOrGap::Gap, BaseOrGap::Base], [cell[0], cell[1] - 1]),
+                    Traceback::Up => ([BaseOrGap::Base, BaseOrGap::Gap], [cell[0] - 1, cell[1]]),
+                };
+
+                target.push(t);
+                query.push(q);
+            }
+
+            target.push(BaseOrGap::Base);
+            query.push(BaseOrGap::Base);
+
+            [target, query]
+        };
+
+        let [mut target, mut query] = inner();
+
+        if FORWARD {
+            target.reverse();
+            query.reverse();
+        }
+
+        let target = AlignedSequence(target);
+        let query = AlignedSequence(query);
+        AlignmentResult { target, query }
+    }
+
+    fn merge_upstream_downstream(
+        mut upstream: Self::Alignment,
+        downstream: Self::Alignment,
+        seed_size: NonZeroUsize,
+    ) -> Self::Alignment {
+        // Last base of upstream is the first base of the seed
+        // First base of downstream is the last base of the seed
+
+        upstream.0.extend(
+            iter::repeat(BaseOrGap::Base)
+                .take(seed_size.get() - 1)
+                .chain(downstream.0.into_iter().skip(1)),
+        );
+        upstream
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum BaseOrGap {
+    Base,
+    Gap,
+}
+
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+pub(crate) struct AlignedSequence(pub(crate) Vec<BaseOrGap>);
+
 impl<'a> Aligner<'a> {
     pub(crate) fn new(cli: &'a Cli) -> Self {
         Self {
@@ -69,7 +192,10 @@ impl<'a> Aligner<'a> {
         }
     }
 
-    pub(crate) fn align(&mut self, params: AlignParams) -> AlignResult {
+    pub(crate) fn align<Behavior: AlignBehavior>(
+        &mut self,
+        params: AlignParams,
+    ) -> AlignResult<Behavior::Alignment> {
         let AlignParams {
             query,
             target,
@@ -100,7 +226,9 @@ impl<'a> Aligner<'a> {
                 if query.is_empty() || target.is_empty() {
                     return AlignResult {
                         query_index: *query_range.end(),
+                        query_alignment: Default::default(),
                         target_index: *target_range.end(),
+                        target_alignment: Default::default(),
                         score: seed_score,
                     };
                 }
@@ -109,10 +237,16 @@ impl<'a> Aligner<'a> {
                 let target_index = target_range.end() + best_cell[0];
                 let query_index = query_range.end() + best_cell[1];
                 let score = self.matrix[best_cell].score;
+                let AlignmentResult {
+                    query: query_alignment,
+                    target: target_alignment,
+                } = Behavior::get_alignment::<true>(&self.matrix, best_cell);
 
                 AlignResult {
                     query_index,
+                    query_alignment,
                     target_index,
+                    target_alignment,
                     score,
                 }
             }
@@ -129,7 +263,9 @@ impl<'a> Aligner<'a> {
                 if query.is_empty() || target.is_empty() {
                     return AlignResult {
                         query_index: query_range.start().saturating_sub(1),
+                        query_alignment: Default::default(),
                         target_index: target_range.start().saturating_sub(1),
+                        target_alignment: Default::default(),
                         score: seed_score,
                     };
                 }
@@ -138,10 +274,16 @@ impl<'a> Aligner<'a> {
                 let target_index = target_range.start().checked_sub(best_cell[0]).unwrap();
                 let query_index = query_range.start().checked_sub(best_cell[1]).unwrap();
                 let score = self.matrix[best_cell].score;
+                let AlignmentResult {
+                    query: query_alignment,
+                    target: target_alignment,
+                } = Behavior::get_alignment::<true>(&self.matrix, best_cell);
 
                 AlignResult {
                     query_index,
+                    query_alignment,
                     target_index,
+                    target_alignment,
                     score,
                 }
             }
@@ -1110,7 +1252,7 @@ mod tests {
 
         let mut aligner = Aligner::new(&cli);
         // None of these must panic
-        aligner.align(AlignParams {
+        aligner.align::<NoOpBehavior>(AlignParams {
             query,
             target,
             query_range: (0..=query.reactivity().len()),
@@ -1120,7 +1262,7 @@ mod tests {
             direction: Direction::Downstream,
         });
 
-        aligner.align(AlignParams {
+        aligner.align::<NoOpBehavior>(AlignParams {
             query,
             target,
             query_range: 0..=10,
@@ -1130,7 +1272,7 @@ mod tests {
             direction: Direction::Downstream,
         });
 
-        aligner.align(AlignParams {
+        aligner.align::<NoOpBehavior>(AlignParams {
             query,
             target,
             query_range: 0..=20,
@@ -1139,7 +1281,7 @@ mod tests {
             align_tolerance,
             direction: Direction::Upstream,
         });
-        aligner.align(AlignParams {
+        aligner.align::<NoOpBehavior>(AlignParams {
             query,
             target,
             query_range: 10..=20,
@@ -1160,5 +1302,99 @@ mod tests {
                 downstream: 12,
             }
         )
+    }
+
+    macro_rules! cell {
+        (d) => {
+            Cell {
+                traceback: Traceback::Diagonal,
+                ..Default::default()
+            }
+        };
+
+        (u) => {
+            Cell {
+                traceback: Traceback::Up,
+                ..Default::default()
+            }
+        };
+
+        (l) => {
+            Cell {
+                traceback: Traceback::Left,
+                ..Default::default()
+            }
+        };
+    }
+
+    macro_rules! cells {
+        ($($cell:tt)*) => {
+            vec![$(cell!($cell)),*]
+        };
+    }
+
+    macro_rules! base_or_gap {
+        (-) => {
+            BaseOrGap::Gap
+        };
+
+        (x) => {
+            BaseOrGap::Base
+        };
+    }
+
+    macro_rules! aln_seq {
+        ($($base_or_gap:tt)*) => {
+            AlignedSequence(vec![$(base_or_gap!($base_or_gap)),*])
+        }
+    }
+
+    #[test]
+    fn backtracking_alignment_forward() {
+        let cells = cells![
+            d l l l l l l
+            u d l l l l l
+            u u l l l l l
+            u u l l l l l
+            u u d l l l l
+            u u u d l l l
+            u u u u u u d
+            u u u u u u u
+        ];
+        let matrix = Array2::<Cell>::from_shape_vec((8, 7), cells).unwrap();
+        let alignment = BacktrackBehavior::get_alignment::<true>(&matrix, [6, 6]);
+        assert_eq!(alignment.target, aln_seq!(x x x x x x - - x ));
+        assert_eq!(alignment.query, aln_seq!( x x - - x x x x x ));
+    }
+
+    #[test]
+    fn backtracking_alignment_backward() {
+        let cells = cells![
+            d l l l l l l l l
+            u d l l l l l l l
+            u u l l l l l l l
+            u u l l l l l l l
+            u u d l l l l l l
+            u u u d l l l l l
+            u u u u u u d l l
+            u u u u u u u u l
+        ];
+        let matrix = Array2::<Cell>::from_shape_vec((8, 9), cells).unwrap();
+        let alignment = BacktrackBehavior::get_alignment::<false>(&matrix, [6, 6]);
+        assert_eq!(alignment.target, aln_seq!(x - - x x x x x x));
+        assert_eq!(alignment.query, aln_seq!( x x x x x - - x x));
+    }
+
+    #[test]
+    fn merge_alignment() {
+        let upstream = aln_seq!(- x x - - x);
+        let downstream = aln_seq!(x x - x x);
+
+        let merge = BacktrackBehavior::merge_upstream_downstream(
+            upstream,
+            downstream,
+            NonZeroUsize::new(4).unwrap(),
+        );
+        assert_eq!(merge, aln_seq!(- x x - - x x x x x - x x));
     }
 }
