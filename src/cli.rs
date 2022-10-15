@@ -76,6 +76,11 @@ pub struct Cli {
     #[clap(long, alias = "reportAln", arg_enum)]
     pub report_alignment: Option<ReportAlignment>,
 
+    /// Reports reactivity for sequence alignments in the "reactivities" folder inside the output
+    /// directory, using JSON format
+    #[clap(long)]
+    pub report_reactivity: bool,
+
     /// Query SHAPE profile is first used to calculate a base-pairing probability profile, that is
     /// then used to search into the db
     ///

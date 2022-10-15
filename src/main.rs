@@ -16,11 +16,12 @@ use std::{
     iter::Sum,
     num::ParseFloatError,
     ops::{self, Not, RangeInclusive},
+    path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
 };
 
-use aligner::{AlignedSequence, Aligner, AlignmentResult, NoOpBehavior};
+use aligner::{AlignedSequence, Aligner, AlignmentResult, BaseOrGap, NoOpBehavior};
 use anyhow::Context;
 use clap::Parser;
 use cli::{AlignmentFoldingEvaluationArgs, MinMax};
@@ -40,7 +41,7 @@ use num_traits::{
 };
 use query_aligner::{align_query_to_target_db, QueryAlignResult};
 use rayon::prelude::*;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{ser::SerializeSeq, Deserialize, Deserializer, Serialize, Serializer};
 use smallvec::SmallVec;
 use tabled::{Table, Tabled};
 
@@ -63,6 +64,7 @@ fn main() -> anyhow::Result<()> {
             },
         threads,
         report_alignment,
+        report_reactivity,
         ..
     } = cli;
 
@@ -187,6 +189,11 @@ fn main() -> anyhow::Result<()> {
             }
             ReportAlignment::Stockholm => todo!("stockholm format is still unimplemented"),
         }
+    }
+
+    if report_reactivity {
+        write_results_reactivity(&results, &db_entries, &query_entries, output)
+            .context("Unable to write result reactivity in JSON format")?;
     }
 
     // Clear screen and position cursor to row 1, column 1
@@ -1129,6 +1136,188 @@ fn display_scientific(x: &f64) -> String {
     } else {
         format!("{x:.3e}")
     }
+}
+
+struct ResultFileFormat<'a> {
+    db_name: &'a str,
+    db_range: RangeInclusive<usize>,
+    query_name: &'a str,
+    query_range: RangeInclusive<usize>,
+}
+
+impl<'a> From<&'a QueryResult> for ResultFileFormat<'a> {
+    fn from(result: &'a QueryResult) -> Self {
+        let &QueryResult {
+            query: ref query_name,
+            db_entry: ref db_name,
+            query_start,
+            query_end,
+            db_start,
+            db_end,
+            ..
+        } = result;
+
+        let db_range = db_start..=db_end;
+        let query_range = query_start..=query_end;
+
+        Self {
+            db_name,
+            db_range,
+            query_name,
+            query_range,
+        }
+    }
+}
+
+impl fmt::Display for ResultFileFormat<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            db_name,
+            db_range,
+            query_name,
+            query_range,
+        } = self;
+
+        write!(
+            f,
+            "{}_{}-{}_{}_{}-{}",
+            db_name,
+            db_range.start(),
+            db_range.end(),
+            query_name,
+            query_range.start(),
+            query_range.end()
+        )
+    }
+}
+
+struct GappedReactivity<'a> {
+    reactivity: &'a [Reactivity],
+    alignment: &'a AlignedSequence,
+}
+
+impl<'a> Serialize for GappedReactivity<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut usable_alignment = 0;
+        let gaps = self
+            .alignment
+            .0
+            .iter()
+            .scan(0, |bases, base| {
+                if *bases == self.reactivity.len() {
+                    None
+                } else {
+                    usable_alignment += 1;
+                    if let BaseOrGap::Base = base {
+                        *bases += 1;
+                    }
+                    Some(base)
+                }
+            })
+            .filter(|base| matches!(base, BaseOrGap::Gap))
+            .count();
+        let usable_alignment = usable_alignment;
+        let len = self.reactivity.len() + gaps;
+        let mut seq = serializer.serialize_seq(Some(len))?;
+
+        let mut reactivities = self.reactivity.iter();
+        for base_or_gap in &self.alignment.0[..usable_alignment] {
+            match base_or_gap {
+                BaseOrGap::Base => match reactivities.next() {
+                    Some(reactivity) if reactivity.is_nan() => seq.serialize_element("NaN")?,
+                    Some(reactivity) => seq.serialize_element(reactivity)?,
+                    None => break,
+                },
+                BaseOrGap::Gap => seq.serialize_element(&f32::NAN)?,
+            }
+        }
+
+        reactivities.try_for_each(|reactivity| seq.serialize_element(reactivity))?;
+        seq.end()
+    }
+}
+
+fn write_results_reactivity(
+    results: &[QueryResult],
+    db_entries: &[db_file::Entry],
+    query_entries: &[query_file::Entry],
+    output_dir: &Path,
+) -> Result<(), anyhow::Error> {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Data<'a> {
+        query: GappedReactivity<'a>,
+        query_id: &'a str,
+        query_from: usize,
+        query_to: usize,
+        target: GappedReactivity<'a>,
+        target_id: &'a str,
+        target_from: usize,
+        target_to: usize,
+    }
+
+    let mut reactivities_path = PathBuf::from(output_dir);
+    reactivities_path.push("reactivities");
+    fs::create_dir_all(&reactivities_path)
+        .context("Unable to create output reactivities directory")?;
+
+    let mut iter = results.iter().map(|result| {
+        let query_entry = query_entries
+            .iter()
+            .find(|query| query.name() == &*result.query)
+            .expect("query must be available in queries");
+
+        let db_entry = db_entries
+            .iter()
+            .find(|db| db.name() == result.db_entry)
+            .expect("target must be available in db");
+
+        let query = &query_entry.reactivity()[result.query_start..=result.query_end];
+        let target = &db_entry.reactivity()[result.db_start..=result.db_end];
+
+        let data = Data {
+            query: GappedReactivity {
+                reactivity: query,
+                alignment: &result.alignment.query,
+            },
+            query_id: query_entry.name(),
+            query_from: result.query_start,
+            query_to: result.query_end,
+            target: GappedReactivity {
+                reactivity: target,
+                alignment: &result.alignment.target,
+            },
+            target_id: db_entry.name(),
+            target_from: result.db_start,
+            target_to: result.db_end,
+        };
+
+        (result, data)
+    });
+
+    let (result, data) = match iter.next() {
+        Some(result) => result,
+        None => return Ok(()),
+    };
+
+    let mut filename = format!("{}.json", ResultFileFormat::from(result));
+    reactivities_path.push(&filename);
+
+    let file = File::create(&reactivities_path)?;
+    serde_json::to_writer(file, &data)?;
+
+    iter.try_for_each(move |(result, data)| {
+        filename.clear();
+        write!(filename, "{}.json", ResultFileFormat::from(result)).unwrap();
+        reactivities_path.set_file_name(&filename);
+
+        let file = File::create(&reactivities_path)?;
+        serde_json::to_writer(file, &data)?;
+        Ok(())
+    })
 }
 
 #[cfg(test)]
@@ -2699,5 +2888,64 @@ mod tests {
                 .map(|index| 15. + (index as f32) * 3.)
                 .collect::<Vec<_>>()
         )
+    }
+
+    #[test]
+    fn serialize_gapped_reactivity() {
+        use std::f64::NAN;
+        use BaseOrGap::*;
+
+        fn check(reactivity: &[f32], alignment: &AlignedSequence, expected: &[f64]) {
+            let values = serde_json::to_value(GappedReactivity {
+                reactivity,
+                alignment,
+            })
+            .unwrap();
+            let values: Vec<Option<f64>> = serde_json::from_value(values).unwrap();
+
+            assert_eq!(values.len(), expected.len());
+            assert!(values.iter().zip(expected).all(|(a, b)| match a {
+                Some(a) => (a - b).abs() < 0.00001,
+                None => b.is_nan(),
+            }));
+        }
+
+        check(
+            &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            &AlignedSequence(vec![
+                Gap, Gap, Base, Base, Gap, Base, Gap, Gap, Base, Base, Base, Gap,
+            ]),
+            &[
+                NAN, NAN, 0.1, 0.2, NAN, 0.3, NAN, NAN, 0.4, 0.5, 0.6, NAN, 0.7,
+            ],
+        );
+
+        check(
+            &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            &AlignedSequence(vec![Base, Base, Gap, Base]),
+            &[0.1, 0.2, NAN, 0.3, 0.4, 0.5, 0.6, 0.7],
+        );
+
+        check(
+            &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            &AlignedSequence(vec![Base; 40]),
+            &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+        );
+
+        check(
+            &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            &AlignedSequence(vec![
+                Base, Base, Base, Base, Base, Base, Base, Gap, Gap, Gap,
+            ]),
+            &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+        );
+
+        check(
+            &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            &AlignedSequence(vec![
+                Gap, Gap, Gap, Base, Base, Base, Base, Base, Base, Base, Gap, Gap, Gap,
+            ]),
+            &[NAN, NAN, NAN, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+        );
     }
 }

@@ -9,7 +9,7 @@ use anyhow::Context;
 
 use crate::{
     aligner::{AlignedSequence, BaseOrGap},
-    db_file, query_file, QueryResult, Sequence, SequenceEntry,
+    db_file, query_file, QueryResult, ResultFileFormat, Sequence, SequenceEntry,
 };
 
 pub(crate) struct Entry<'a> {
@@ -54,20 +54,7 @@ pub(crate) fn write_result(
 }
 
 fn result_filename(result: &QueryResult) -> String {
-    let &QueryResult {
-        ref query,
-        ref db_entry,
-        query_start,
-        query_end,
-        db_start,
-        db_end,
-        ..
-    } = result;
-
-    format!(
-        "{}_{}-{}_{}_{}-{}.fasta",
-        db_entry, db_start, db_end, query, query_start, query_end
-    )
+    format!("{}.fasta", ResultFileFormat::from(result))
 }
 
 #[inline]

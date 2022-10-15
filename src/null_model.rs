@@ -405,8 +405,8 @@ mod tests {
         assert_eq!(get_chunk_with_offset(1, 3, 5, &data), [3, 4, 5, 6, 7]);
         assert_eq!(get_chunk_with_offset(2, 3, 5, &data), [8, 9, 10, 11, 12]);
 
-        assert_eq!(get_chunk_with_offset(0, 15, 5, &data), []);
-        assert_eq!(get_chunk_with_offset(1, 15, 5, &data), []);
+        assert_eq!(get_chunk_with_offset(0, 15, 5, &data), [] as [u32; 0]);
+        assert_eq!(get_chunk_with_offset(1, 15, 5, &data), [] as [u32; 0]);
     }
 
     #[test]
