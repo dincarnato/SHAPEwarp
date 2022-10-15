@@ -1063,10 +1063,10 @@ fn remove_overlapping_results(
                             > (a_len.min(b_len)) * max_align_overlap
                     }
                 })
-                .map(move |(b_offset, b)| (a_index, a_index + b_offset + 1, a.2, b.2))
+                .map(move |(b_offset, b)| (a_index, a_index + b_offset + 1, a.0.score, b.0.score))
         })
-        .for_each(|(a_index, b_index, a_evalue, b_evalue)| {
-            if a_evalue <= b_evalue {
+        .for_each(|(a_index, b_index, a_score, b_score)| {
+            if a_score >= b_score {
                 indices_buffer.push(b_index);
             } else {
                 indices_buffer.push(a_index);
@@ -2527,7 +2527,7 @@ mod tests {
         reactivity: Vec::new(),
     };
     macro_rules! query_result {
-        ($query:expr, $evalue:expr) => {
+        ($query:expr, $score:expr) => {
             (
                 QueryAlignResult {
                     db_entry: &EMPTY_ENTRY,
@@ -2535,13 +2535,13 @@ mod tests {
                         db: 0..=0,
                         query: 0..=0,
                     },
-                    score: 0.,
+                    score: $score,
                     db: 0..=0,
                     query: $query,
                     alignment: Default::default(),
                 },
                 0.0,
-                $evalue,
+                0.0,
             )
         };
 
@@ -2565,28 +2565,28 @@ mod tests {
 
     #[test]
     fn remove_overlapping_results_simple_overlap() {
-        let mut results = vec![query_result!(0..=10, 0.2), query_result!(4..=14, 0.5)];
+        let mut results = vec![query_result!(0..=10, 0.5), query_result!(4..=14, 0.2)];
         remove_overlapping_results(&mut results, &mut vec![0, 1, 2, 3, 4], &dummy_cli());
 
-        assert_eq!(results, vec![query_result!(0..=10, 0.2)]);
+        assert_eq!(results, vec![query_result!(0..=10, 0.5)]);
 
-        results = vec![query_result!(0..=10, 0.5), query_result!(4..=14, 0.2)];
+        results = vec![query_result!(0..=10, 0.2), query_result!(4..=14, 0.5)];
         remove_overlapping_results(&mut results, &mut vec![0, 1, 2, 3, 4], &dummy_cli());
 
-        assert_eq!(results, vec![query_result!(4..=14, 0.2)]);
+        assert_eq!(results, vec![query_result!(4..=14, 0.5)]);
     }
 
     #[test]
     fn remove_overlapping_results_nested_overlap() {
-        let mut results = vec![query_result!(0..=10, 0.2), query_result!(2..=6, 0.5)];
+        let mut results = vec![query_result!(0..=10, 0.5), query_result!(2..=6, 0.2)];
         remove_overlapping_results(&mut results, &mut vec![], &dummy_cli());
 
-        assert_eq!(results, vec![query_result!(0..=10, 0.2)]);
+        assert_eq!(results, vec![query_result!(0..=10, 0.5)]);
 
-        results = vec![query_result!(0..=10, 0.5), query_result!(2..=6, 0.2)];
+        results = vec![query_result!(0..=10, 0.2), query_result!(2..=6, 0.5)];
         remove_overlapping_results(&mut results, &mut vec![], &dummy_cli());
 
-        assert_eq!(results, vec![query_result!(2..=6, 0.2)]);
+        assert_eq!(results, vec![query_result!(2..=6, 0.5)]);
     }
 
     #[test]
@@ -2594,7 +2594,7 @@ mod tests {
         let mut results = vec![
             query_result!(0..=5, 0.5),
             query_result!(2..=8, 0.5),
-            query_result!(4..=10, 0.2),
+            query_result!(4..=10, 0.7),
             query_result!(6..=12, 0.5),
             query_result!(8..=14, 0.5),
             query_result!(10..=16, 0.5),
@@ -2603,13 +2603,13 @@ mod tests {
 
         // The reason for this result is, using the current algorithm:
         // - the second is removed because this is the current behavior for overlapping sequences
-        //   with the same evalue;
-        // - the third is kept (it removes the second, again) because it has a lower evalue;
+        //   with the same score;
+        // - the third is kept (it removes the second, again) because it has a higher score;
         // - all the others are removed "by chaining" (the first has a higher priority in case of
-        //   equal evalue, but it's been removed by another comparison).
+        //   equal score, but it's been removed by another comparison).
         assert_eq!(
             results,
-            vec![query_result!(0..=5, 0.5), query_result!(4..=10, 0.2)]
+            vec![query_result!(0..=5, 0.5), query_result!(4..=10, 0.7)]
         );
     }
 
@@ -2659,12 +2659,15 @@ mod tests {
         remove_overlapping_results(&mut results, &mut indices, &cli);
 
         assert_eq!(results.len(), targets.len());
-        let mut p_values: Vec<_> = results.into_iter().map(|(_, p_value, _)| p_value).collect();
-        p_values.sort_unstable_by(f64::total_cmp);
+        let mut scores: Vec<_> = results
+            .into_iter()
+            .map(|(result, _, _)| result.score)
+            .collect();
+        scores.sort_unstable_by(f32::total_cmp);
         assert_eq!(
-            p_values,
+            scores,
             (0..5)
-                .map(|index| index as f64 / 1000. + 0.01 - 0.0003)
+                .map(|index| 15. + (index as f32) * 3.)
                 .collect::<Vec<_>>()
         )
     }
