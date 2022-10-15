@@ -229,11 +229,11 @@ pub struct KmerLookupArgs {
 #[serde(rename_all = "kebab-case")]
 pub struct AlignmentArgs {
     /// Minimum and maximum score reactivity differences below 0.5 will be mapped to
-    #[clap(long, default_value_t = MinMax (-0.5..2.), alias = "alignMatchScore")]
+    #[clap(long, default_value_t = MinMax (-0.5..2.), alias = "alignMatchScore", allow_hyphen_values = true)]
     pub align_match_score: MinMax<Reactivity>,
 
     /// Minimum and maximum score reactivity differences above 0.5 will be mapped to
-    #[clap(long, default_value_t = MinMax (-6.0..-0.5), alias = "alignMismatchScore")]
+    #[clap(long, default_value_t = MinMax (-6.0..-0.5), alias = "alignMismatchScore", allow_hyphen_values = true)]
     pub align_mismatch_score: MinMax<Reactivity>,
 
     /// Gap open penalty
