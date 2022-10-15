@@ -123,7 +123,24 @@ impl ExtremeDistribution {
     where
         T: NumCast + Copy,
     {
-        let len = sample.len() as f64;
+        let len = sample.len();
+        match len {
+            0 => {
+                return Self {
+                    location: 0.,
+                    scale: 0.,
+                };
+            }
+            1 => {
+                return Self {
+                    location: cast(sample[0]).unwrap(),
+                    scale: 0.,
+                };
+            }
+            _ => {}
+        }
+
+        let len = len as f64;
         let len_inv = 1. / len;
         let mean: f64 = sample
             .iter()
