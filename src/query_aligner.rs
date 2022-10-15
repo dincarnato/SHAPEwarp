@@ -118,35 +118,42 @@ impl<'q, 'db, 'res, 'cli, 'aln> QueryAlignIterator<'q, 'db, 'res, 'cli, 'aln> {
         cli: &'cli Cli,
         aligner: &'aln mut Aligner<'cli>,
     ) -> Option<&mut QueryAlignIteratorInner<'q, 'db, 'res, 'cli, 'aln>> {
-        query_results
-            .next()
-            .map(|query_result| {
-                let &DbEntryMatches {
-                    db_entry,
-                    matches: ref db,
-                } = query_result;
+        query_results.next().map(|query_result| {
+            let &DbEntryMatches {
+                db_entry,
+                matches: ref db,
+            } = query_result;
 
-                QueryAlignIteratorInner {
-                    aligner,
-                    db_iter: db.iter(),
-                    query_entry,
-                    db_entry,
-                    cli,
-                }
-            })
-            .map(move |iter| {
-                self.0 = QueryAlignIteratorEnum::Full {
-                    query_results,
-                    iter,
-                    query_entry,
-                    cli,
-                };
+            let iter = QueryAlignIteratorInner {
+                aligner,
+                db_iter: db.iter(),
+                query_entry,
+                db_entry,
+                cli,
+            };
 
-                match &mut self.0 {
-                    QueryAlignIteratorEnum::Full { iter, .. } => iter,
-                    _ => unreachable!(),
-                }
-            })
+            self.0 = QueryAlignIteratorEnum::Full {
+                query_results,
+                iter,
+                query_entry,
+                cli,
+            };
+
+            match &mut self.0 {
+                QueryAlignIteratorEnum::Full { iter, .. } => iter,
+                _ => unreachable!(),
+            }
+        })
+    }
+
+    #[inline]
+    fn get_next_from_new_iter(&mut self) -> Option<QueryAlignResult<'res>> {
+        loop {
+            let next = self.make_new_iter()?.next();
+            if next.is_some() {
+                break next;
+            }
+        }
     }
 }
 
@@ -155,12 +162,12 @@ impl<'q, 'db, 'res, 'cli, 'aln> Iterator for QueryAlignIterator<'q, 'db, 'res, '
 
     fn next(&mut self) -> Option<Self::Item> {
         match &mut self.0 {
-            QueryAlignIteratorEnum::Empty { .. } => self.make_new_iter()?.next(),
+            QueryAlignIteratorEnum::Empty { .. } => self.get_next_from_new_iter(),
             QueryAlignIteratorEnum::Full { iter, .. } => match iter.next() {
                 Some(item) => Some(item),
-                None => self.make_new_iter()?.next(),
+                None => self.get_next_from_new_iter(),
             },
-            QueryAlignIteratorEnum::Finished { .. } => None,
+            QueryAlignIteratorEnum::Finished => None,
         }
     }
 }
@@ -244,6 +251,7 @@ impl<'q, 'db: 'res, 'res, 'cli, 'aln> Iterator
 
             let query = upstream_result.query_index..=downstream_result.query_index;
             let db = upstream_result.target_index..=downstream_result.target_index;
+
             let aligned_query_len = downstream_result.query_index + 1 - upstream_result.query_index;
             let score = downstream_result.score as f64
                 * ((aligned_query_len as f64).ln() / (query_len as f64).ln());
