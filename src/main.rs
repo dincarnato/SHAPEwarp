@@ -53,6 +53,7 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     let Cli {
+        overwrite,
         ref output,
         alignment_folding_eval_args:
             AlignmentFoldingEvaluationArgs {
@@ -69,6 +70,15 @@ fn main() -> anyhow::Result<()> {
         .num_threads(threads.unwrap_or(0).into())
         .build_global()
         .context("Unable to create thread pool")?;
+
+    if overwrite && matches!(output.try_exists(), Ok(true)) {
+        if let Err(err) = fs::remove_dir_all(output) {
+            eprintln!(
+                "Warning: cannot remove {} directory: {err}",
+                output.display()
+            );
+        }
+    }
 
     fs::create_dir_all(output).context("Unable to create output directory")?;
     write_cli_to_file(&cli)?;
