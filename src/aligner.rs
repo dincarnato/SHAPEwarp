@@ -163,9 +163,10 @@ impl AlignBehavior for BacktrackBehavior {
         downstream: Self::Alignment,
         seed_size: NonZeroUsize,
     ) -> Self::Alignment {
-        // Last base of upstream is the first base of the seed
+        // Last base of upstream is the first base of the seed, sequence is reversed
         // First base of downstream is the last base of the seed
 
+        upstream.0.reverse();
         upstream.0.extend(
             iter::repeat(BaseOrGap::Base)
                 .take(seed_size.get() - 1)
@@ -1387,14 +1388,17 @@ mod tests {
 
     #[test]
     fn merge_alignment() {
-        let upstream = aln_seq!(- x x - - x);
-        let downstream = aln_seq!(x x - x x);
+        let upstream = aln_seq!(x x - x - x x - - - x - x x - - x);
+        let downstream = aln_seq!(x x - x x - - x - x x x x);
 
         let merge = BacktrackBehavior::merge_upstream_downstream(
             upstream,
             downstream,
             NonZeroUsize::new(4).unwrap(),
         );
-        assert_eq!(merge, aln_seq!(- x x - - x x x x x - x x));
+        assert_eq!(
+            merge,
+            aln_seq!(x - - x x - x - - - x x - x - x x x x x x - x x - - x - x x x x)
+        );
     }
 }
