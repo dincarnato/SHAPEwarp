@@ -288,7 +288,12 @@ mod tests {
         let shuffled_entry = shuffled_entries.into_iter().next().unwrap();
         assert_eq!(shuffled_entry.id, entry_id);
         assert_eq!(shuffled_entry.sequence, expected_sequence);
-        assert_eq!(shuffled_entry.reactivity(), expected_reactivity);
+        assert!(shuffled_entry
+            .reactivity()
+            .iter()
+            .copied()
+            .zip(expected_reactivity)
+            .all(|(a, b)| (a.is_nan() && b.is_nan()) || a == b));
     }
 
     #[test]
@@ -355,7 +360,12 @@ mod tests {
         let shuffled_entry = shuffled_entries.into_iter().next().unwrap();
         assert_eq!(shuffled_entry.id, entry_id);
         assert_eq!(shuffled_entry.sequence, expected_sequence);
-        assert_eq!(shuffled_entry.reactivity(), expected_reactivity);
+        assert!(shuffled_entry
+            .reactivity()
+            .iter()
+            .copied()
+            .zip(expected_reactivity)
+            .all(|(a, b)| (a.is_nan() && b.is_nan()) || a == b));
     }
 
     #[test]

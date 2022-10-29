@@ -173,7 +173,14 @@ where
                     .map(|()| reactivity_buffer)
             })
             // Reactivity is an alias to either f32 or f64
-            .map_ok(|bytes| { f64::from_le_bytes(bytes) as Reactivity })
+            .map_ok(|bytes| {
+                let reactivity = f64::from_le_bytes(bytes) as Reactivity;
+                if reactivity == -999. {
+                    Reactivity::NAN
+                } else {
+                    reactivity
+                }
+            })
             .collect::<Result<Vec<_>, _>>());
 
         if reactivity.len() != sequence_len {
@@ -278,5 +285,17 @@ mod tests {
             .try_fold(0, |acc, seq_len| seq_len.map(|seq_len| acc + seq_len))
             .unwrap();
         assert_eq!(db_len, usize::try_from(reader._db_len).unwrap());
+    }
+
+    #[test]
+    fn transform_pseudo_nans() {
+        let mut reader = Reader::new(Cursor::new(TEST_DB)).unwrap();
+        let entry = reader.entries().next().unwrap().unwrap();
+
+        // The first 13 reactivities are -999 in the file
+        assert!(entry.reactivity[..13]
+            .iter()
+            .copied()
+            .all(|reactivity| reactivity.is_nan()));
     }
 }
