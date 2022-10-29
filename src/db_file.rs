@@ -7,7 +7,7 @@ use std::{
 
 use itertools::Itertools;
 
-use crate::{Base, Reactivity, SequenceEntry};
+use crate::{Base, Molecule, Reactivity, SequenceEntry};
 
 const END_SIZE: u8 = 17;
 const END_MARKER: &[u8] = b"[eofdb]";
@@ -97,6 +97,10 @@ impl SequenceEntry for Entry {
 
     fn reactivity(&self) -> &[Reactivity] {
         &self.reactivity
+    }
+
+    fn molecule(&self) -> crate::Molecule {
+        Molecule::Dna
     }
 }
 

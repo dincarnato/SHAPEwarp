@@ -553,13 +553,30 @@ impl Base {
         Ok([first, second])
     }
 
-    fn to_byte(self) -> u8 {
-        match self {
+    fn try_to_byte(self, molecule: Molecule) -> Option<u8> {
+        Some(match self {
             Self::A => b'A',
             Self::C => b'C',
             Self::G => b'G',
-            Self::T => b'T',
+            Self::T => match molecule {
+                Molecule::Dna => b'T',
+                Molecule::Rna => b'U',
+                Molecule::Unknown => return None,
+            },
             Self::N => b'N',
+        })
+    }
+
+    #[inline]
+    fn to_byte(self, molecule: Molecule) -> u8 {
+        self.try_to_byte(molecule).expect("cannot convert a timine-like residue to an ASCII representation when the molecule is unknown")
+    }
+
+    #[inline]
+    fn display(self, molecule: Molecule) -> BaseDisplay {
+        BaseDisplay {
+            base: self,
+            molecule,
         }
     }
 }
@@ -572,25 +589,34 @@ impl TryFrom<u8> for Base {
             b'A' => Self::A,
             b'C' => Self::C,
             b'G' => Self::G,
-            b'T' => Self::T,
+            b'T' | b'U' => Self::T,
             b'N' => Self::N,
             _ => return Err(InvalidEncodedBase),
         })
     }
 }
 
-impl fmt::Display for Base {
+struct BaseDisplay {
+    base: Base,
+    molecule: Molecule,
+}
+
+impl fmt::Display for BaseDisplay {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let byte = self.to_byte();
-        f.write_char(byte.into())
+        f.write_char(self.base.to_byte(self.molecule).into())
     }
 }
 
-struct Sequence<'a>(pub &'a [Base]);
+struct Sequence<'a> {
+    pub bases: &'a [Base],
+    pub molecule: Molecule,
+}
 
 impl fmt::Display for Sequence<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.iter().try_for_each(|base| base.fmt(f))
+        self.bases
+            .iter()
+            .try_for_each(|base| write!(f, "{}", base.display(self.molecule)))
     }
 }
 
@@ -1063,6 +1089,7 @@ trait SequenceEntry {
     fn name(&self) -> &str;
     fn sequence(&self) -> &[Base];
     fn reactivity(&self) -> &[Reactivity];
+    fn molecule(&self) -> Molecule;
 }
 
 fn write_cli_to_file(cli: &Cli) -> anyhow::Result<()> {
@@ -1330,6 +1357,14 @@ fn write_results_reactivity(
         serde_json::to_writer(file, &data)?;
         Ok(())
     })
+}
+
+#[derive(Debug, Default, Clone, Copy, Eq, Hash, PartialEq)]
+enum Molecule {
+    Dna,
+    Rna,
+    #[default]
+    Unknown,
 }
 
 #[cfg(test)]
@@ -2959,5 +2994,47 @@ mod tests {
             ]),
             &[NAN, NAN, NAN, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
         );
+    }
+
+    #[test]
+    fn base_from_u8() {
+        assert_eq!(Base::try_from(b'A'), Ok(Base::A));
+        assert_eq!(Base::try_from(b'C'), Ok(Base::C));
+        assert_eq!(Base::try_from(b'G'), Ok(Base::G));
+        assert_eq!(Base::try_from(b'T'), Ok(Base::T));
+        assert_eq!(Base::try_from(b'U'), Ok(Base::T));
+    }
+
+    #[test]
+    fn display_sequence() {
+        let bases = [Base::C, Base::T, Base::G, Base::A];
+        assert_eq!(
+            Sequence {
+                bases: &bases,
+                molecule: Molecule::Dna,
+            }
+            .to_string(),
+            "CTGA",
+        );
+
+        assert_eq!(
+            Sequence {
+                bases: &bases,
+                molecule: Molecule::Rna,
+            }
+            .to_string(),
+            "CUGA",
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn cannot_display_sequence_for_unknown_molecule() {
+        let bases = [Base::C, Base::T, Base::G, Base::A];
+        Sequence {
+            bases: &bases,
+            molecule: Molecule::Unknown,
+        }
+        .to_string();
     }
 }

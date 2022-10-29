@@ -6,13 +6,14 @@ use std::{
     sync::Arc,
 };
 
-use crate::{Base, Reactivity, SequenceEntry};
+use crate::{Base, Molecule, Reactivity, SequenceEntry};
 
 #[derive(Debug, Clone)]
 pub struct Entry {
     pub name: Arc<str>,
     sequence: Vec<Base>,
     reactivities: Vec<Reactivity>,
+    pub(crate) molecule: Molecule,
 }
 
 impl Entry {
@@ -36,6 +37,10 @@ impl SequenceEntry for Entry {
 
     fn reactivity(&self) -> &[Reactivity] {
         &self.reactivities
+    }
+
+    fn molecule(&self) -> Molecule {
+        self.molecule
     }
 }
 
@@ -114,6 +119,7 @@ where
             return Err(Error::TruncatedExpectedSequence);
         }
 
+        let mut molecule = Molecule::default();
         let sequence = line
             .as_bytes()
             .iter()
@@ -122,6 +128,18 @@ where
             .skip_while(|(_, c)| c.is_ascii_whitespace())
             .take_while(|(_, c)| c.is_ascii_whitespace().not())
             .map(|(index, c)| {
+                match (c, molecule) {
+                    (b'T', Molecule::Unknown) => molecule = Molecule::Dna,
+                    (b'U', Molecule::Unknown) => molecule = Molecule::Rna,
+                    (b'T', Molecule::Rna) | (b'U', Molecule::Dna) => {
+                        return Err(Error::InvalidSequenceBase(Box::new(RowColumn {
+                            row: file_row,
+                            column: index + 1,
+                        })));
+                    }
+                    _ => {}
+                }
+
                 Base::try_from(c).map_err(|_| {
                     Error::InvalidSequenceBase(Box::new(RowColumn {
                         row: file_row,
@@ -178,6 +196,7 @@ where
             name,
             sequence,
             reactivities,
+            molecule,
         })
     }
 
