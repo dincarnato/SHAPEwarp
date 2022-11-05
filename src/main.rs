@@ -186,7 +186,12 @@ fn main() -> anyhow::Result<()> {
                         matches!(result.status, QueryResultStatus::PassInclusionEvalue)
                     })
                     .try_for_each(|result| {
-                        fasta::write_result(result, &db_entries, &query_entries, &alignments_path)
+                        fasta::write_result(
+                            result,
+                            &db_entries_orig,
+                            &query_entries_orig,
+                            &alignments_path,
+                        )
                     })
                     .context("Unable to write report alignment in FASTA format")?;
             }
@@ -195,7 +200,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     if report_reactivity {
-        write_results_reactivity(&results, &db_entries, &query_entries, output)
+        write_results_reactivity(&results, &db_entries_orig, &query_entries_orig, output)
             .context("Unable to write result reactivity in JSON format")?;
     }
 
