@@ -246,7 +246,7 @@ struct HandlerData<'a> {
 fn handle_query_entry<'a>(
     query_entry: &'a query_file::Entry,
     handler_data: HandlerData<'a>,
-) -> Result<MutableHandlerData, anyhow::Error> {
+) -> Result<MutableHandlerData<'a>, anyhow::Error> {
     let HandlerData {
         shared:
             SharedHandlerData {
