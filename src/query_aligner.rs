@@ -17,12 +17,12 @@ use crate::{
     MatchRanges, Reactivity, SequenceEntry,
 };
 
-pub(crate) fn align_query_to_target_db<'q, 'db, 'cli, Behavior>(
-    query_entry: &'q query_file::Entry,
-    db_entries: &'db [db_file::Entry],
-    query_results: &mut Vec<DbEntryMatches<'db>>,
+pub(crate) fn align_query_to_target_db<'a, 'cli, Behavior>(
+    query_entry: &'a query_file::Entry,
+    db_entries: &'a [db_file::Entry],
+    query_results: &mut Vec<DbEntryMatches<'a>>,
     cli: &'cli Cli,
-) -> anyhow::Result<QueryAligner<'q, 'cli, Behavior>> {
+) -> anyhow::Result<QueryAligner<'a, 'cli, Behavior>> {
     query_results.clear();
     for db_entry in db_entries {
         let db_file::Entry {
@@ -55,18 +55,18 @@ pub(crate) fn align_query_to_target_db<'q, 'db, 'cli, Behavior>(
     })
 }
 
-pub(crate) struct QueryAligner<'q, 'cli, Behavior> {
-    query_entry: &'q query_file::Entry,
+pub(crate) struct QueryAligner<'a, 'cli, Behavior> {
+    query_entry: &'a query_file::Entry,
     cli: &'cli Cli,
     _marker: PhantomData<Behavior>,
 }
 
-impl<'q, 'cli, Behavior> QueryAligner<'q, 'cli, Behavior> {
-    pub(crate) fn into_iter<'res, 'db, 'aln>(
+impl<'a, 'cli, Behavior> QueryAligner<'a, 'cli, Behavior> {
+    pub(crate) fn into_iter<'aln>(
         self,
-        query_results: &'res [DbEntryMatches<'db>],
+        query_results: &'a [DbEntryMatches<'a>],
         aligner: &'aln mut Aligner<'cli>,
-    ) -> QueryAlignIterator<'q, 'db, 'res, 'cli, 'aln, Behavior> {
+    ) -> QueryAlignIterator<'a, 'cli, 'aln, Behavior> {
         let Self {
             query_entry,
             cli,
@@ -83,30 +83,28 @@ impl<'q, 'cli, Behavior> QueryAligner<'q, 'cli, Behavior> {
     }
 }
 
-pub(crate) struct QueryAlignIterator<'q, 'db, 'res, 'cli, 'aln, Behavior>(
-    QueryAlignIteratorEnum<'q, 'db, 'res, 'cli, 'aln, Behavior>,
+pub(crate) struct QueryAlignIterator<'a, 'cli, 'aln, Behavior>(
+    QueryAlignIteratorEnum<'a, 'cli, 'aln, Behavior>,
 );
 
-enum QueryAlignIteratorEnum<'q, 'db, 'res, 'cli, 'aln, Behavior> {
+enum QueryAlignIteratorEnum<'a, 'cli, 'aln, Behavior> {
     Empty {
-        query_results: slice::Iter<'res, DbEntryMatches<'db>>,
-        query_entry: &'q query_file::Entry,
+        query_results: slice::Iter<'a, DbEntryMatches<'a>>,
+        query_entry: &'a query_file::Entry,
         cli: &'cli Cli,
         aligner: &'aln mut Aligner<'cli>,
     },
     Full {
-        query_results: slice::Iter<'res, DbEntryMatches<'db>>,
-        iter: QueryAlignIteratorInner<'q, 'db, 'res, 'cli, 'aln, Behavior>,
-        query_entry: &'q query_file::Entry,
+        query_results: slice::Iter<'a, DbEntryMatches<'a>>,
+        iter: QueryAlignIteratorInner<'a, 'cli, 'aln, Behavior>,
+        query_entry: &'a query_file::Entry,
         cli: &'cli Cli,
     },
     Finished,
 }
 
-impl<'q, 'db, 'res, 'cli, 'aln, Behavior> QueryAlignIterator<'q, 'db, 'res, 'cli, 'aln, Behavior> {
-    fn make_new_iter(
-        &mut self,
-    ) -> Option<&mut QueryAlignIteratorInner<'q, 'db, 'res, 'cli, 'aln, Behavior>> {
+impl<'a, 'cli, 'aln, Behavior> QueryAlignIterator<'a, 'cli, 'aln, Behavior> {
+    fn make_new_iter(&mut self) -> Option<&mut QueryAlignIteratorInner<'a, 'cli, 'aln, Behavior>> {
         match mem::replace(&mut self.0, QueryAlignIteratorEnum::Finished) {
             QueryAlignIteratorEnum::Empty {
                 query_results,
@@ -129,11 +127,11 @@ impl<'q, 'db, 'res, 'cli, 'aln, Behavior> QueryAlignIterator<'q, 'db, 'res, 'cli
 
     fn create_new_state(
         &mut self,
-        mut query_results: slice::Iter<'res, DbEntryMatches<'db>>,
-        query_entry: &'q query_file::Entry,
+        mut query_results: slice::Iter<'a, DbEntryMatches<'a>>,
+        query_entry: &'a query_file::Entry,
         cli: &'cli Cli,
         aligner: &'aln mut Aligner<'cli>,
-    ) -> Option<&mut QueryAlignIteratorInner<'q, 'db, 'res, 'cli, 'aln, Behavior>> {
+    ) -> Option<&mut QueryAlignIteratorInner<'a, 'cli, 'aln, Behavior>> {
         query_results.next().map(|query_result| {
             let &DbEntryMatches {
                 db_entry,
@@ -164,7 +162,7 @@ impl<'q, 'db, 'res, 'cli, 'aln, Behavior> QueryAlignIterator<'q, 'db, 'res, 'cli
     }
 
     #[inline]
-    fn get_next_from_new_iter(&mut self) -> Option<QueryAlignResult<'res, Behavior::Alignment>>
+    fn get_next_from_new_iter(&mut self) -> Option<QueryAlignResult<'a, Behavior::Alignment>>
     where
         Behavior: AlignBehavior,
         <Behavior as AlignBehavior>::Alignment: std::fmt::Debug,
@@ -178,13 +176,12 @@ impl<'q, 'db, 'res, 'cli, 'aln, Behavior> QueryAlignIterator<'q, 'db, 'res, 'cli
     }
 }
 
-impl<'q, 'db, 'res, 'cli, 'aln, Behavior> Iterator
-    for QueryAlignIterator<'q, 'db, 'res, 'cli, 'aln, Behavior>
+impl<'a, 'cli, 'aln, Behavior> Iterator for QueryAlignIterator<'a, 'cli, 'aln, Behavior>
 where
     Behavior: AlignBehavior,
     <Behavior as AlignBehavior>::Alignment: std::fmt::Debug,
 {
-    type Item = QueryAlignResult<'res, Behavior::Alignment>;
+    type Item = QueryAlignResult<'a, Behavior::Alignment>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match &mut self.0 {
@@ -198,18 +195,18 @@ where
     }
 }
 
-struct QueryAlignIteratorInner<'q, 'db, 'res, 'cli, 'aln, Behavior> {
+struct QueryAlignIteratorInner<'a, 'cli, 'aln, Behavior> {
     aligner: &'aln mut Aligner<'cli>,
-    db_iter: slice::Iter<'res, MatchRanges>,
-    query_entry: &'q query_file::Entry,
-    db_entry: &'db db_file::Entry,
+    db_iter: slice::Iter<'a, MatchRanges>,
+    query_entry: &'a query_file::Entry,
+    db_entry: &'a db_file::Entry,
     cli: &'cli Cli,
     _marker: PhantomData<Behavior>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct QueryAlignResult<'res, Alignment> {
-    pub(crate) db_entry: &'res db_file::Entry,
+pub(crate) struct QueryAlignResult<'a, Alignment> {
+    pub(crate) db_entry: &'a db_file::Entry,
     pub(crate) db_match: MatchRanges,
     pub(crate) score: Reactivity,
     pub(crate) db: ops::RangeInclusive<usize>,
@@ -217,13 +214,12 @@ pub(crate) struct QueryAlignResult<'res, Alignment> {
     pub(crate) alignment: Arc<AlignmentResult<Alignment>>,
 }
 
-impl<'q, 'db: 'res, 'res, 'cli, 'aln, Behavior> Iterator
-    for QueryAlignIteratorInner<'q, 'db, 'res, 'cli, 'aln, Behavior>
+impl<'a, 'cli, 'aln, Behavior> Iterator for QueryAlignIteratorInner<'a, 'cli, 'aln, Behavior>
 where
     Behavior: AlignBehavior,
     <Behavior as AlignBehavior>::Alignment: std::fmt::Debug,
 {
-    type Item = QueryAlignResult<'res, Behavior::Alignment>;
+    type Item = QueryAlignResult<'a, Behavior::Alignment>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let &mut Self {
