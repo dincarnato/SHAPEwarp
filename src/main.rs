@@ -147,7 +147,7 @@ fn main() -> anyhow::Result<()> {
     });
 
     let mut results_writer = {
-        let file = File::create(&results_path).context("Unable to create results.out file")?;
+        let file = File::create(results_path).context("Unable to create results.out file")?;
         create_csv_from_writer(file)
     };
     if results.is_empty() {
