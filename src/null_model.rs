@@ -1,6 +1,6 @@
-use std::mem;
+use std::{iter, mem};
 
-use num_traits::{cast, NumCast};
+use num_traits::cast;
 use rand::prelude::*;
 
 use crate::db_file::Entry;
@@ -18,59 +18,69 @@ fn make_shuffled_db_inner<R: Rng>(
 ) -> Vec<Entry> {
     let mut chunk_indices = Vec::new();
 
-    db.iter()
-        .map(|entry| {
-            let (offset, chunks) =
-                get_random_offset_and_chunks(entry.sequence.len(), block_size, &mut rng);
+    let sequences = db.len() * shuffle_iterations;
+    iter::from_fn(move || {
+        let entry = db.choose(&mut rng)?;
+        let (offset, chunks) =
+            get_random_offset_and_chunks(entry.sequence.len(), block_size, &mut rng);
 
-            resize_indices(&mut chunk_indices, chunks);
-            for _ in 0..shuffle_iterations {
-                chunk_indices.shuffle(&mut rng);
+        resize_indices(&mut chunk_indices, chunks);
+        chunk_indices.shuffle(&mut rng);
+
+        get_shuffled_entry(&chunk_indices, entry, offset, block_size)
+    })
+    .take(sequences)
+    .collect()
+}
+
+#[inline]
+fn get_shuffled_entry(
+    chunk_indices: &[usize],
+    entry: &Entry,
+    offset: usize,
+    block_size: usize,
+) -> Option<Entry> {
+    let mut sequence = Vec::with_capacity(entry.sequence.len());
+    let mut reactivity = Vec::with_capacity(entry.reactivity.len());
+
+    match offset {
+        0 => {
+            for &chunk_index in chunk_indices {
+                sequence.extend_from_slice(get_chunk_without_offset(
+                    chunk_index,
+                    block_size,
+                    &entry.sequence,
+                ));
+                reactivity.extend_from_slice(get_chunk_without_offset(
+                    chunk_index,
+                    block_size,
+                    &entry.reactivity,
+                ));
             }
-
-            let mut sequence = Vec::with_capacity(entry.sequence.len());
-            let mut reactivity = Vec::with_capacity(entry.reactivity.len());
-
-            match offset {
-                0 => {
-                    for &chunk_index in &chunk_indices {
-                        sequence.extend_from_slice(get_chunk_without_offset(
-                            chunk_index,
-                            block_size,
-                            &entry.sequence,
-                        ));
-                        reactivity.extend_from_slice(get_chunk_without_offset(
-                            chunk_index,
-                            block_size,
-                            &entry.reactivity,
-                        ));
-                    }
-                }
-                _ => {
-                    for &chunk_index in &chunk_indices {
-                        sequence.extend_from_slice(get_chunk_with_offset(
-                            chunk_index,
-                            offset,
-                            block_size,
-                            &entry.sequence,
-                        ));
-                        reactivity.extend_from_slice(get_chunk_with_offset(
-                            chunk_index,
-                            offset,
-                            block_size,
-                            &entry.reactivity,
-                        ));
-                    }
-                }
+        }
+        _ => {
+            for &chunk_index in chunk_indices {
+                sequence.extend_from_slice(get_chunk_with_offset(
+                    chunk_index,
+                    offset,
+                    block_size,
+                    &entry.sequence,
+                ));
+                reactivity.extend_from_slice(get_chunk_with_offset(
+                    chunk_index,
+                    offset,
+                    block_size,
+                    &entry.reactivity,
+                ));
             }
+        }
+    }
 
-            Entry {
-                id: entry.id.clone(),
-                sequence,
-                reactivity,
-            }
-        })
-        .collect()
+    Some(Entry {
+        id: entry.id.clone(),
+        sequence,
+        reactivity,
+    })
 }
 
 fn resize_indices(indices: &mut Vec<usize>, new_size: usize) {
@@ -121,7 +131,7 @@ const EULER_MASCHERONI: f64 = 0.577_215_664_901_532_9;
 impl ExtremeDistribution {
     pub(crate) fn from_sample<T>(sample: &[T]) -> Self
     where
-        T: NumCast + Copy,
+        T: num_traits::NumCast + Copy,
     {
         let len = sample.len();
         match len {
@@ -169,7 +179,7 @@ impl ExtremeDistribution {
 
     pub(crate) fn cdf<T>(&self, value: T) -> f64
     where
-        T: NumCast,
+        T: num_traits::NumCast,
     {
         let z = (cast::<_, f64>(value).unwrap() - self.location) / self.scale;
         f64::exp(-f64::exp(-z))
@@ -178,7 +188,7 @@ impl ExtremeDistribution {
     #[inline]
     pub(crate) fn p_value<T>(&self, value: T) -> f64
     where
-        T: NumCast,
+        T: num_traits::NumCast,
     {
         1. - self.cdf(value)
     }
@@ -218,75 +228,49 @@ mod tests {
     use super::*;
 
     #[test]
-    fn shuffled_db_with_offset() {
-        const SEED: u64 = 10;
+    fn shuffled_entry_with_offset() {
         const SEQUENCE_LEN: usize = 1553;
         const BLOCK_SIZE: usize = 13;
-        const SHUFFLE_ITERATIONS: usize = 3;
-        const EXPECTED_OFFSET: usize = 3;
-        // 1 chunk for the initial offset, 1 chunk for the remainder
-        const EXPECTED_CHUNKS: usize = (SEQUENCE_LEN - EXPECTED_OFFSET) / BLOCK_SIZE + 1 + 1;
-        const EXPECTED_SHUFFLED_INDICES: [usize; EXPECTED_CHUNKS] = [
-            43, 65, 15, 119, 37, 68, 48, 104, 110, 28, 70, 88, 18, 55, 50, 103, 4, 114, 49, 67, 83,
-            58, 54, 115, 89, 32, 95, 42, 91, 46, 79, 99, 21, 53, 77, 86, 60, 92, 94, 98, 29, 107,
-            56, 31, 90, 9, 64, 84, 25, 34, 41, 17, 3, 81, 39, 11, 118, 113, 74, 100, 20, 117, 102,
-            22, 97, 62, 75, 111, 57, 72, 76, 112, 87, 96, 2, 106, 35, 36, 7, 13, 12, 51, 82, 40, 1,
-            80, 30, 5, 61, 69, 38, 52, 59, 63, 71, 105, 10, 27, 45, 23, 85, 24, 73, 19, 108, 44,
-            66, 33, 101, 120, 8, 6, 116, 109, 93, 26, 16, 14, 0, 78, 47,
+        const OFFSET: usize = 3;
+        // 1 chunk for the remainder
+        const EXPECTED_CHUNKS: usize =
+            1 + (1553 - OFFSET) / BLOCK_SIZE + ((SEQUENCE_LEN - OFFSET) % BLOCK_SIZE != 0) as usize;
+        const SHUFFLED_INDICES: [usize; EXPECTED_CHUNKS] = [
+            72, 38, 19, 42, 26, 13, 69, 51, 5, 97, 79, 62, 102, 28, 3, 120, 44, 103, 32, 81, 85,
+            27, 93, 113, 106, 15, 65, 36, 59, 98, 99, 77, 84, 29, 39, 61, 16, 30, 80, 1, 68, 14,
+            78, 90, 95, 118, 41, 10, 116, 91, 37, 70, 0, 92, 46, 18, 9, 2, 63, 57, 110, 40, 66, 49,
+            108, 56, 119, 7, 50, 107, 55, 54, 4, 104, 115, 23, 53, 111, 82, 24, 35, 71, 12, 43, 76,
+            48, 52, 25, 87, 100, 17, 74, 20, 94, 114, 109, 86, 34, 58, 21, 105, 64, 88, 60, 117,
+            22, 31, 89, 73, 11, 101, 75, 112, 96, 83, 47, 67, 8, 45, 33, 6,
         ];
 
         let mut db = db_file::Reader::new(File::open("test_data/test.db").unwrap()).unwrap();
         let entry = db.entries().next().unwrap().unwrap();
 
-        // Check if we are on the same page
-        let mut rng = SmallRng::seed_from_u64(SEED);
         assert_eq!(entry.sequence.len(), SEQUENCE_LEN);
-        assert_eq!(
-            entry.sequence[EXPECTED_OFFSET..].chunks(BLOCK_SIZE).count() + 1,
-            EXPECTED_CHUNKS
-        );
-        assert_eq!(
-            rng.gen_range(0..(SEQUENCE_LEN % BLOCK_SIZE)),
-            EXPECTED_OFFSET
-        );
-        let mut indices = Vec::new();
-        super::resize_indices(&mut indices, EXPECTED_CHUNKS);
-        std::iter::repeat(())
-            .take(SHUFFLE_ITERATIONS)
-            .for_each(|()| indices.shuffle(&mut rng));
-        assert_eq!(indices, EXPECTED_SHUFFLED_INDICES);
-        drop(indices);
 
-        let expected_sequence: Vec<_> = EXPECTED_SHUFFLED_INDICES
-            .iter()
-            .copied()
-            .flat_map(|chunk_index| {
-                get_chunk_with_offset(chunk_index, EXPECTED_OFFSET, BLOCK_SIZE, &entry.sequence)
-            })
+        let split_sequence: Vec<_> = iter::once(&entry.sequence[..OFFSET])
+            .chain(entry.sequence[OFFSET..].chunks(BLOCK_SIZE))
+            .collect();
+        let expected_sequence: Vec<_> = SHUFFLED_INDICES
+            .into_iter()
+            .flat_map(|index| split_sequence[index])
             .copied()
             .collect();
 
-        let expected_reactivity: Vec<_> = EXPECTED_SHUFFLED_INDICES
-            .iter()
-            .copied()
-            .flat_map(|chunk_index| {
-                get_chunk_with_offset(chunk_index, EXPECTED_OFFSET, BLOCK_SIZE, &entry.reactivity)
-            })
+        let split_reactivities: Vec<_> = iter::once(&entry.reactivity[..OFFSET])
+            .chain(entry.reactivity[OFFSET..].chunks(BLOCK_SIZE))
+            .collect();
+        let expected_reactivity: Vec<_> = SHUFFLED_INDICES
+            .into_iter()
+            .flat_map(|index| split_reactivities[index])
             .copied()
             .collect();
 
-        let entry_id = entry.id.clone();
+        let shuffled_entry =
+            get_shuffled_entry(&SHUFFLED_INDICES, &entry, OFFSET, BLOCK_SIZE).unwrap();
 
-        let shuffled_entries = make_shuffled_db_inner(
-            &[entry],
-            BLOCK_SIZE,
-            SHUFFLE_ITERATIONS,
-            SmallRng::seed_from_u64(SEED),
-        );
-
-        assert_eq!(shuffled_entries.len(), 1);
-        let shuffled_entry = shuffled_entries.into_iter().next().unwrap();
-        assert_eq!(shuffled_entry.id, entry_id);
+        assert_eq!(shuffled_entry.id, entry.id);
         assert_eq!(shuffled_entry.sequence, expected_sequence);
         assert!(shuffled_entry
             .reactivity()
@@ -297,68 +281,42 @@ mod tests {
     }
 
     #[test]
-    fn shuffled_db_without_offset() {
-        const SEED: u64 = 9;
+    fn shuffled_entry_without_offset() {
         const SEQUENCE_LEN: usize = 1553;
         const BLOCK_SIZE: usize = 13;
-        const SHUFFLE_ITERATIONS: usize = 3;
-        // 1 chunk for the remainder
-        const EXPECTED_CHUNKS: usize = SEQUENCE_LEN / BLOCK_SIZE + 1;
-        const EXPECTED_SHUFFLED_INDICES: [usize; EXPECTED_CHUNKS] = [
-            75, 109, 64, 94, 116, 12, 38, 30, 91, 40, 66, 35, 15, 53, 60, 48, 119, 77, 71, 23, 61,
-            68, 99, 9, 16, 93, 83, 115, 84, 62, 26, 37, 107, 88, 117, 95, 6, 56, 113, 19, 20, 70,
-            87, 98, 43, 112, 101, 108, 4, 106, 114, 78, 104, 76, 81, 72, 17, 13, 49, 100, 21, 67,
-            28, 46, 8, 27, 90, 118, 5, 29, 85, 92, 54, 73, 44, 96, 63, 58, 89, 55, 14, 97, 18, 32,
-            103, 86, 80, 31, 36, 69, 3, 59, 65, 50, 0, 110, 7, 102, 22, 42, 82, 24, 10, 111, 57,
-            25, 2, 39, 1, 45, 105, 11, 74, 52, 33, 34, 79, 47, 41, 51,
+        const EXPECTED_CHUNKS: usize =
+            SEQUENCE_LEN / BLOCK_SIZE + (SEQUENCE_LEN % BLOCK_SIZE != 0) as usize;
+        const SHUFFLED_INDICES: [usize; EXPECTED_CHUNKS] = [
+            72, 38, 19, 42, 26, 13, 69, 51, 5, 97, 79, 62, 102, 28, 3, 44, 103, 32, 81, 85, 27, 93,
+            113, 106, 15, 65, 36, 59, 98, 99, 77, 84, 29, 39, 61, 16, 30, 80, 1, 68, 14, 78, 90,
+            95, 118, 41, 10, 116, 91, 37, 70, 0, 92, 46, 18, 9, 2, 63, 57, 110, 40, 66, 49, 108,
+            56, 119, 7, 50, 107, 55, 54, 4, 104, 115, 23, 53, 111, 82, 24, 35, 71, 12, 43, 76, 48,
+            52, 25, 87, 100, 17, 74, 20, 94, 114, 109, 86, 34, 58, 21, 105, 64, 88, 60, 117, 22,
+            31, 89, 73, 11, 101, 75, 112, 96, 83, 47, 67, 8, 45, 33, 6,
         ];
 
         let mut db = db_file::Reader::new(File::open("test_data/test.db").unwrap()).unwrap();
         let entry = db.entries().next().unwrap().unwrap();
 
-        // Check if we are on the same page
-        let mut rng = SmallRng::seed_from_u64(SEED);
-        assert_eq!(rng.gen_range(0..(SEQUENCE_LEN % BLOCK_SIZE)), 0);
         assert_eq!(entry.sequence.len(), SEQUENCE_LEN);
-        assert_eq!(entry.sequence.chunks(BLOCK_SIZE).count(), EXPECTED_CHUNKS);
-        let mut indices = Vec::new();
-        super::resize_indices(&mut indices, EXPECTED_CHUNKS);
-        std::iter::repeat(())
-            .take(SHUFFLE_ITERATIONS)
-            .for_each(|()| indices.shuffle(&mut rng));
-        assert_eq!(indices, EXPECTED_SHUFFLED_INDICES);
-        drop(indices);
 
-        let expected_sequence: Vec<_> = EXPECTED_SHUFFLED_INDICES
-            .iter()
-            .copied()
-            .flat_map(|chunk_index| {
-                get_chunk_without_offset(chunk_index, BLOCK_SIZE, &entry.sequence)
-            })
+        let split_sequence: Vec<_> = entry.sequence.chunks(BLOCK_SIZE).collect();
+        let expected_sequence: Vec<_> = SHUFFLED_INDICES
+            .into_iter()
+            .flat_map(|index| split_sequence[index])
             .copied()
             .collect();
 
-        let expected_reactivity: Vec<_> = EXPECTED_SHUFFLED_INDICES
-            .iter()
-            .copied()
-            .flat_map(|chunk_index| {
-                get_chunk_without_offset(chunk_index, BLOCK_SIZE, &entry.reactivity)
-            })
+        let split_reactivities: Vec<_> = entry.reactivity.chunks(BLOCK_SIZE).collect();
+        let expected_reactivity: Vec<_> = SHUFFLED_INDICES
+            .into_iter()
+            .flat_map(|index| split_reactivities[index])
             .copied()
             .collect();
 
-        let entry_id = entry.id.clone();
+        let shuffled_entry = get_shuffled_entry(&SHUFFLED_INDICES, &entry, 0, BLOCK_SIZE).unwrap();
 
-        let shuffled_entries = make_shuffled_db_inner(
-            &[entry],
-            BLOCK_SIZE,
-            SHUFFLE_ITERATIONS,
-            SmallRng::seed_from_u64(SEED),
-        );
-
-        assert_eq!(shuffled_entries.len(), 1);
-        let shuffled_entry = shuffled_entries.into_iter().next().unwrap();
-        assert_eq!(shuffled_entry.id, entry_id);
+        assert_eq!(shuffled_entry.id, entry.id);
         assert_eq!(shuffled_entry.sequence, expected_sequence);
         assert!(shuffled_entry
             .reactivity()
