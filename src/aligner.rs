@@ -10,7 +10,8 @@ use ndarray::{s, Array2};
 use crate::{
     calc_base_alignment_score,
     cli::{AlignmentArgs, Cli},
-    db_file, get_sequence_base_alignment_score, query_file, Base, Reactivity, SequenceEntry,
+    db_file::{self, ReactivityWithPlaceholder},
+    get_sequence_base_alignment_score, query_file, Base, Reactivity, SequenceEntry,
 };
 
 const MIN_BAND_SIZE: usize = 10;
@@ -293,13 +294,18 @@ impl<'a> Aligner<'a> {
 
     fn handle_slices<'b, const FW: bool>(
         &mut self,
-        query: &'b EntrySlice<'b, FW>,
-        target: &'b EntrySlice<'b, FW>,
+        query: &'b EntrySlice<'b, Reactivity, FW>,
+        target: &'b EntrySlice<'b, ReactivityWithPlaceholder, FW>,
         seed_score: Reactivity,
     ) -> [usize; 2]
     where
-        &'b EntrySlice<'b, FW>: IntoIterator<Item = EntryElement>,
-        EntrySlice<'b, FW>: IntoIterator<Item = EntryElement> + EntrySliceExt,
+        &'b EntrySlice<'b, Reactivity, FW>: IntoIterator<Item = EntryElement<Reactivity>>,
+        EntrySlice<'b, Reactivity, FW>:
+            IntoIterator<Item = EntryElement<Reactivity>> + EntrySliceExt<Reactivity>,
+        &'b EntrySlice<'b, ReactivityWithPlaceholder, FW>:
+            IntoIterator<Item = EntryElement<ReactivityWithPlaceholder>>,
+        EntrySlice<'b, ReactivityWithPlaceholder, FW>: IntoIterator<Item = EntryElement<ReactivityWithPlaceholder>>
+            + EntrySliceExt<ReactivityWithPlaceholder>,
     {
         // TODO: this is unconvenient, we cannot arbitrarly reshape ndarrays, maybe we
         // should avoid reallocations
@@ -311,12 +317,17 @@ impl<'a> Aligner<'a> {
     #[inline(always)]
     fn create_matrix<'b, const FW: bool>(
         &mut self,
-        query: &'b EntrySlice<'b, FW>,
-        target: &'b EntrySlice<'b, FW>,
+        query: &'b EntrySlice<'b, Reactivity, FW>,
+        target: &'b EntrySlice<'b, ReactivityWithPlaceholder, FW>,
     ) -> Array2<Cell>
     where
-        &'b EntrySlice<'b, FW>: IntoIterator<Item = EntryElement>,
-        EntrySlice<'b, FW>: IntoIterator<Item = EntryElement> + EntrySliceExt,
+        &'b EntrySlice<'b, Reactivity, FW>: IntoIterator<Item = EntryElement<Reactivity>>,
+        EntrySlice<'b, Reactivity, FW>:
+            IntoIterator<Item = EntryElement<Reactivity>> + EntrySliceExt<Reactivity>,
+        &'b EntrySlice<'b, ReactivityWithPlaceholder, FW>:
+            IntoIterator<Item = EntryElement<ReactivityWithPlaceholder>>,
+        EntrySlice<'b, ReactivityWithPlaceholder, FW>: IntoIterator<Item = EntryElement<ReactivityWithPlaceholder>>
+            + EntrySliceExt<ReactivityWithPlaceholder>,
     {
         // We need to add 1 row and column for the starting base of the seed.
         let rows = target.len() + 1;
@@ -374,12 +385,17 @@ impl<'a> Aligner<'a> {
 
     fn align_diagonal_band<'b, const FW: bool>(
         &mut self,
-        query: &'b EntrySlice<'b, FW>,
-        target: &'b EntrySlice<'b, FW>,
+        query: &'b EntrySlice<'b, Reactivity, FW>,
+        target: &'b EntrySlice<'b, ReactivityWithPlaceholder, FW>,
     ) -> [usize; 2]
     where
-        &'b EntrySlice<'b, FW>: IntoIterator<Item = EntryElement>,
-        EntrySlice<'b, FW>: IntoIterator<Item = EntryElement> + EntrySliceExt,
+        &'b EntrySlice<'b, Reactivity, FW>: IntoIterator<Item = EntryElement<Reactivity>>,
+        EntrySlice<'b, Reactivity, FW>:
+            IntoIterator<Item = EntryElement<Reactivity>> + EntrySliceExt<Reactivity>,
+        &'b EntrySlice<'b, ReactivityWithPlaceholder, FW>:
+            IntoIterator<Item = EntryElement<ReactivityWithPlaceholder>>,
+        EntrySlice<'b, ReactivityWithPlaceholder, FW>: IntoIterator<Item = EntryElement<ReactivityWithPlaceholder>>
+            + EntrySliceExt<ReactivityWithPlaceholder>,
     {
         #[derive(Debug)]
         struct State {
@@ -411,7 +427,9 @@ impl<'a> Aligner<'a> {
         let state = State::new(initial_score, [0, 0], alignment_args);
 
         let calc_alignment_score = if alignment_args.align_score_seq {
-            |query: &EntryElement, target: &EntryElement, cli: &Cli| {
+            |query: &EntryElement<Reactivity>,
+             target: &EntryElement<ReactivityWithPlaceholder>,
+             cli: &Cli| {
                 calc_base_alignment_score(query.reactivity, target.reactivity, cli)
                     + get_sequence_base_alignment_score(
                         query.base,
@@ -420,7 +438,9 @@ impl<'a> Aligner<'a> {
                     )
             }
         } else {
-            |query: &EntryElement, target: &EntryElement, cli: &Cli| {
+            |query: &EntryElement<Reactivity>,
+             target: &EntryElement<ReactivityWithPlaceholder>,
+             cli: &Cli| {
                 calc_base_alignment_score(query.reactivity, target.reactivity, cli)
             }
         };
@@ -577,18 +597,16 @@ pub(crate) enum Direction {
 }
 
 #[derive(Debug)]
-struct EntrySlice<'a, const FW: bool> {
+struct EntrySlice<'a, T, const FW: bool> {
     sequence: &'a [Base],
-    reactivity: &'a [Reactivity],
+    reactivity: &'a [T],
 }
 
-impl<'a, const FW: bool> EntrySlice<'a, FW> {
+impl<'a, T, const FW: bool> EntrySlice<'a, T, FW> {
     fn new<E, R>(entry: &'a E, range: R) -> Self
     where
-        E: SequenceEntry,
-        R: SliceIndex<[Base], Output = [Base]>
-            + SliceIndex<[Reactivity], Output = [Reactivity]>
-            + Clone,
+        E: SequenceEntry<Reactivity = T>,
+        R: SliceIndex<[Base], Output = [Base]> + SliceIndex<[T], Output = [T]> + Clone,
     {
         let sequence = &entry.sequence()[range.clone()];
         let reactivity = &entry.reactivity()[range];
@@ -627,38 +645,34 @@ impl<'a, const FW: bool> EntrySlice<'a, FW> {
     }
 }
 
-impl<'a> EntrySlice<'a, true> {
+impl<'a, T> EntrySlice<'a, T, true> {
     #[inline]
     fn forward<E, R>(entry: &'a E, range: R) -> Self
     where
-        E: SequenceEntry,
-        R: SliceIndex<[Base], Output = [Base]>
-            + SliceIndex<[Reactivity], Output = [Reactivity]>
-            + Clone,
+        E: SequenceEntry<Reactivity = T>,
+        R: SliceIndex<[Base], Output = [Base]> + SliceIndex<[T], Output = [T]> + Clone,
     {
         Self::new(entry, range)
     }
 }
 
-impl<'a> EntrySlice<'a, false> {
+impl<'a, T> EntrySlice<'a, T, false> {
     #[inline]
     fn backward<E, R>(entry: &'a E, range: R) -> Self
     where
-        E: SequenceEntry,
-        R: SliceIndex<[Base], Output = [Base]>
-            + SliceIndex<[Reactivity], Output = [Reactivity]>
-            + Clone,
+        E: SequenceEntry<Reactivity = T>,
+        R: SliceIndex<[Base], Output = [Base]> + SliceIndex<[T], Output = [T]> + Clone,
     {
         Self::new(entry, range)
     }
 }
 
-trait EntrySliceExt {
-    fn get(&self, index: usize) -> EntryElement;
+trait EntrySliceExt<T> {
+    fn get(&self, index: usize) -> EntryElement<T>;
 }
 
-impl EntrySliceExt for EntrySlice<'_, true> {
-    fn get(&self, index: usize) -> EntryElement {
+impl<T: Copy> EntrySliceExt<T> for EntrySlice<'_, T, true> {
+    fn get(&self, index: usize) -> EntryElement<T> {
         let base = self.sequence[index];
         let reactivity = self.reactivity[index];
 
@@ -666,8 +680,8 @@ impl EntrySliceExt for EntrySlice<'_, true> {
     }
 }
 
-impl EntrySliceExt for EntrySlice<'_, false> {
-    fn get(&self, index: usize) -> EntryElement {
+impl<T: Copy> EntrySliceExt<T> for EntrySlice<'_, T, false> {
+    fn get(&self, index: usize) -> EntryElement<T> {
         let len = self.len();
         let index = len - 1 - index;
         let base = self.sequence[index];
@@ -677,9 +691,9 @@ impl EntrySliceExt for EntrySlice<'_, false> {
     }
 }
 
-impl<'a> IntoIterator for &'a EntrySlice<'a, true> {
-    type Item = EntryElement;
-    type IntoIter = EntryIterFw<'a>;
+impl<'a, T: Copy> IntoIterator for &'a EntrySlice<'a, T, true> {
+    type Item = EntryElement<T>;
+    type IntoIter = EntryIterFw<'a, T>;
 
     fn into_iter(self) -> Self::IntoIter {
         let sequence = self.sequence.iter();
@@ -692,9 +706,9 @@ impl<'a> IntoIterator for &'a EntrySlice<'a, true> {
     }
 }
 
-impl<'a> IntoIterator for &'a EntrySlice<'a, false> {
-    type Item = EntryElement;
-    type IntoIter = EntryIterBw<'a>;
+impl<'a, T: Copy> IntoIterator for &'a EntrySlice<'a, T, false> {
+    type Item = EntryElement<T>;
+    type IntoIter = EntryIterBw<'a, T>;
 
     fn into_iter(self) -> Self::IntoIter {
         let sequence = self.sequence.iter().rev();
@@ -707,9 +721,9 @@ impl<'a> IntoIterator for &'a EntrySlice<'a, false> {
     }
 }
 
-impl<'a> IntoIterator for EntrySlice<'a, true> {
-    type Item = EntryElement;
-    type IntoIter = EntryIterFw<'a>;
+impl<'a, T: Copy> IntoIterator for EntrySlice<'a, T, true> {
+    type Item = EntryElement<T>;
+    type IntoIter = EntryIterFw<'a, T>;
 
     fn into_iter(self) -> Self::IntoIter {
         let sequence = self.sequence.iter();
@@ -722,9 +736,9 @@ impl<'a> IntoIterator for EntrySlice<'a, true> {
     }
 }
 
-impl<'a> IntoIterator for EntrySlice<'a, false> {
-    type Item = EntryElement;
-    type IntoIter = EntryIterBw<'a>;
+impl<'a, T: Copy> IntoIterator for EntrySlice<'a, T, false> {
+    type Item = EntryElement<T>;
+    type IntoIter = EntryIterBw<'a, T>;
 
     fn into_iter(self) -> Self::IntoIter {
         let sequence = self.sequence.iter().rev();
@@ -737,24 +751,24 @@ impl<'a> IntoIterator for EntrySlice<'a, false> {
     }
 }
 
-struct EntryIterFw<'a> {
+struct EntryIterFw<'a, T> {
     sequence: slice::Iter<'a, Base>,
-    reactivity: slice::Iter<'a, Reactivity>,
+    reactivity: slice::Iter<'a, T>,
 }
 
-struct EntryIterBw<'a> {
+struct EntryIterBw<'a, T> {
     sequence: iter::Rev<slice::Iter<'a, Base>>,
-    reactivity: iter::Rev<slice::Iter<'a, Reactivity>>,
+    reactivity: iter::Rev<slice::Iter<'a, T>>,
 }
 
 #[derive(Debug)]
-struct EntryElement {
+struct EntryElement<T> {
     base: Base,
-    reactivity: Reactivity,
+    reactivity: T,
 }
 
-impl<'a> Iterator for EntryIterFw<'a> {
-    type Item = EntryElement;
+impl<'a, T: Copy> Iterator for EntryIterFw<'a, T> {
+    type Item = EntryElement<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let base = *self.sequence.next()?;
@@ -764,8 +778,8 @@ impl<'a> Iterator for EntryIterFw<'a> {
     }
 }
 
-impl<'a> Iterator for EntryIterBw<'a> {
-    type Item = EntryElement;
+impl<'a, T: Copy> Iterator for EntryIterBw<'a, T> {
+    type Item = EntryElement<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let base = *self.sequence.next()?;
@@ -1084,7 +1098,7 @@ mod tests {
         query.cap_reactivities(cli.max_reactivity);
         let query_sequence = &query.sequence()[query_slice.clone()];
         let query_reactivity = &query.reactivity()[query_slice];
-        let query = EntrySlice::<true> {
+        let query = EntrySlice::<_, true> {
             sequence: query_sequence,
             reactivity: query_reactivity,
         };
@@ -1164,7 +1178,7 @@ mod tests {
         query.cap_reactivities(cli.max_reactivity);
         let query_sequence = &query.sequence()[query_slice.clone()];
         let query_reactivity = &query.reactivity()[query_slice];
-        let query = EntrySlice::<false> {
+        let query = EntrySlice::<_, false> {
             sequence: query_sequence,
             reactivity: query_reactivity,
         };

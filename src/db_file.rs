@@ -6,6 +6,7 @@ use std::{
 };
 
 use itertools::Itertools;
+use serde::{Deserialize, Serialize, Serializer};
 
 use crate::{Base, Molecule, Reactivity, SequenceEntry};
 
@@ -71,22 +72,125 @@ pub struct EntryIter<'a, R> {
 pub struct Entry {
     pub id: String,
     pub(crate) sequence: Vec<Base>,
-    pub reactivity: Vec<Reactivity>,
+    pub reactivity: Vec<ReactivityWithPlaceholder>,
+}
+
+const NAN_PLACEHOLDER: Reactivity = -999.;
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct ReactivityWithPlaceholder(Reactivity);
+
+impl ReactivityWithPlaceholder {
+    pub fn is_nan(self) -> bool {
+        self.0.is_nan() | (self.0 == NAN_PLACEHOLDER)
+    }
+
+    pub fn get_non_nan(self) -> Option<Reactivity> {
+        if self.is_nan() {
+            None
+        } else {
+            Some(self.0)
+        }
+    }
+
+    pub fn to_maybe_placeholder(self) -> Reactivity {
+        if self.0.is_nan() {
+            NAN_PLACEHOLDER
+        } else {
+            self.0
+        }
+    }
+}
+
+impl PartialEq for ReactivityWithPlaceholder {
+    fn eq(&self, other: &Self) -> bool {
+        if (self.0 == NAN_PLACEHOLDER) | (other.0 == NAN_PLACEHOLDER) {
+            false
+        } else {
+            self.0 == other.0
+        }
+    }
+}
+
+impl PartialEq<Reactivity> for ReactivityWithPlaceholder {
+    fn eq(&self, other: &Reactivity) -> bool {
+        if self.0 == NAN_PLACEHOLDER {
+            false
+        } else {
+            self.0 == *other
+        }
+    }
+}
+
+impl PartialOrd for ReactivityWithPlaceholder {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        if (self.0 == NAN_PLACEHOLDER) | (other.0 == NAN_PLACEHOLDER) {
+            None
+        } else {
+            self.0.partial_cmp(&other.0)
+        }
+    }
+}
+
+impl PartialOrd<Reactivity> for ReactivityWithPlaceholder {
+    fn partial_cmp(&self, other: &Reactivity) -> Option<std::cmp::Ordering> {
+        if self.0 == NAN_PLACEHOLDER {
+            None
+        } else {
+            self.0.partial_cmp(other)
+        }
+    }
+}
+
+impl From<Reactivity> for ReactivityWithPlaceholder {
+    fn from(reactivity: Reactivity) -> Self {
+        Self(reactivity)
+    }
+}
+
+impl Serialize for ReactivityWithPlaceholder {
+    #[inline]
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.get_non_nan()
+            .unwrap_or(Reactivity::NAN)
+            .serialize(serializer)
+    }
+}
+
+pub trait ReactivityLike: Copy + PartialOrd + PartialEq {
+    fn is_nan(self) -> bool;
+}
+
+impl ReactivityLike for Reactivity {
+    #[inline]
+    fn is_nan(self) -> bool {
+        Reactivity::is_nan(self)
+    }
+}
+
+impl ReactivityLike for ReactivityWithPlaceholder {
+    #[inline]
+    fn is_nan(self) -> bool {
+        ReactivityWithPlaceholder::is_nan(self)
+    }
 }
 
 impl Entry {
     pub fn cap_reactivities(&mut self, max_reactivity: Reactivity) {
         self.reactivity.iter_mut().for_each(|reactivity| {
-            if reactivity.is_nan() {
-                *reactivity = -999.
-            } else {
-                *reactivity = reactivity.min(max_reactivity)
+            if let Some(r) = reactivity.get_non_nan() {
+                *reactivity = r.min(max_reactivity).into();
             }
         });
     }
 }
 
 impl SequenceEntry for Entry {
+    type Reactivity = ReactivityWithPlaceholder;
+
     fn name(&self) -> &str {
         &self.id
     }
@@ -95,7 +199,7 @@ impl SequenceEntry for Entry {
         &self.sequence
     }
 
-    fn reactivity(&self) -> &[Reactivity] {
+    fn reactivity(&self) -> &[Self::Reactivity] {
         &self.reactivity
     }
 
@@ -179,11 +283,7 @@ where
             // Reactivity is an alias to either f32 or f64
             .map_ok(|bytes| {
                 let reactivity = f64::from_le_bytes(bytes) as Reactivity;
-                if reactivity == -999. {
-                    Reactivity::NAN
-                } else {
-                    reactivity
-                }
+                ReactivityWithPlaceholder::from(reactivity)
             })
             .collect::<Result<Vec<_>, _>>());
 

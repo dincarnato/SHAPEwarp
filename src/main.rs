@@ -25,8 +25,9 @@ use aligner::{AlignedSequence, Aligner, AlignmentResult, BaseOrGap, NoOpBehavior
 use anyhow::Context;
 use clap::Parser;
 use cli::{AlignmentFoldingEvaluationArgs, MinMax};
+use db_file::{ReactivityLike, ReactivityWithPlaceholder};
 use fftw::{
-    array::{AlignedAllocable, AlignedVec},
+    array::AlignedVec,
     plan::{C2CPlan, C2CPlan32, C2CPlan64},
     types::{Flag, Sign},
 };
@@ -36,9 +37,7 @@ use itertools::Itertools;
 use mass::{ComplexExt, Mass};
 use null_model::*;
 use num_complex::Complex;
-use num_traits::{
-    cast, float::FloatCore, Float, FromPrimitive, NumAssign, NumAssignRef, NumOps, NumRef, RefNum,
-};
+use num_traits::{cast, float::FloatCore, Float, FromPrimitive, NumAssignRef, NumRef, RefNum};
 use query_aligner::{align_query_to_target_db, QueryAlignResult};
 use rayon::prelude::*;
 use serde::{ser::SerializeSeq, Deserialize, Deserializer, Serialize, Serializer};
@@ -623,7 +622,11 @@ impl fmt::Display for Sequence<'_> {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct InvalidEncodedBase;
 
-fn calc_seed_alignment_score_from_reactivity(query: &[f32], target: &[f32], cli: &Cli) -> f32 {
+fn calc_seed_alignment_score_from_reactivity(
+    query: &[Reactivity],
+    target: &[ReactivityWithPlaceholder],
+    cli: &Cli,
+) -> f32 {
     assert_eq!(query.len(), target.len());
 
     query
@@ -646,7 +649,11 @@ fn calc_seed_alignment_score_from_sequence(query: &[Base], target: &[Base], cli:
 }
 
 #[inline]
-fn calc_base_alignment_score(query: f32, target: f32, cli: &Cli) -> f32 {
+fn calc_base_alignment_score(
+    query: Reactivity,
+    target: ReactivityWithPlaceholder,
+    cli: &Cli,
+) -> f32 {
     let Cli {
         alignment_args:
             cli::AlignmentArgs {
@@ -658,19 +665,24 @@ fn calc_base_alignment_score(query: f32, target: f32, cli: &Cli) -> f32 {
         ..
     } = cli;
 
-    if query > 1. && target > 1. {
-        0f32
-    } else if query.is_nan() || target == -999. {
-        align_match.start
-    } else {
-        let diff = (query - target).abs();
-        if diff < 0.5 {
-            (0.5 - diff) * (align_match.end - align_match.start) / 0.5 + align_match.start
-        } else {
-            (max_reactivity - diff) * (align_mismatch.end - align_mismatch.start)
-                / (max_reactivity - 0.5)
-                + align_mismatch.start
+    match target.get_non_nan() {
+        Some(target) => {
+            if query.is_nan() {
+                align_match.start
+            } else if query > 1. && target > 1. {
+                0f32
+            } else {
+                let diff = (query - target).abs();
+                if diff < 0.5 {
+                    (0.5 - diff) * (align_match.end - align_match.start) / 0.5 + align_match.start
+                } else {
+                    (max_reactivity - diff) * (align_mismatch.end - align_mismatch.start)
+                        / (max_reactivity - 0.5)
+                        + align_mismatch.start
+                }
+            }
         }
+        None => align_match.start,
     }
 }
 
@@ -688,19 +700,17 @@ fn get_sequence_base_alignment_score(
 }
 
 #[derive(Debug)]
-struct DbData<'a, T> {
+struct DbData<'a> {
     sequence: &'a [Base],
-    reactivity: &'a [T],
-    transformed_reactivity: AlignedVec<Complex<T>>,
+    reactivity: &'a [ReactivityWithPlaceholder],
+    transformed_reactivity: AlignedVec<Complex<Reactivity>>,
 }
 
-impl<'a, T> DbData<'a, T>
-where
-    T: C2CPlanExt,
-    Complex<T>: AlignedAllocable,
-{
-    fn new(sequence: &'a [Base], reactivity: &'a [T]) -> Result<Self, fftw::error::Error> {
-        debug_assert!(reactivity.iter().any(|x| x.is_nan()).not());
+impl<'a> DbData<'a> {
+    fn new(
+        sequence: &'a [Base],
+        reactivity: &'a [ReactivityWithPlaceholder],
+    ) -> Result<Self, fftw::error::Error> {
         let transformed_reactivity = transform_db(reactivity)?;
 
         Ok(Self {
@@ -723,20 +733,19 @@ impl C2CPlanExt for f64 {
     type Plan = C2CPlan64;
 }
 
-fn transform_db<T>(db: &[T]) -> Result<AlignedVec<Complex<T>>, fftw::error::Error>
-where
-    T: C2CPlanExt,
-    Complex<T>: AlignedAllocable,
-{
+fn transform_db(
+    db: &[ReactivityWithPlaceholder],
+) -> Result<AlignedVec<Complex<Reactivity>>, fftw::error::Error> {
     let ts_len = db.len();
     let mut aligned_db = AlignedVec::new(ts_len);
     db.iter()
         .copied()
         .zip(aligned_db.iter_mut())
-        .for_each(|(t, x)| *x = Complex::new(t, T::zero()));
+        .for_each(|(t, x)| *x = Complex::new(t.to_maybe_placeholder(), 0.));
 
-    let mut db_transform = AlignedVec::<Complex<T>>::new(ts_len);
-    let mut fw_plan: T::Plan = C2CPlan::aligned(&[ts_len], Sign::Forward, Flag::ESTIMATE)?;
+    let mut db_transform = AlignedVec::<Complex<_>>::new(ts_len);
+    let mut fw_plan: <Reactivity as C2CPlanExt>::Plan =
+        C2CPlan::aligned(&[ts_len], Sign::Forward, Flag::ESTIMATE)?;
     fw_plan.c2c(&mut aligned_db, &mut db_transform)?;
 
     Ok(db_transform)
@@ -757,29 +766,12 @@ pub enum Error {
     ReaderEntry(#[from] db_file::EntryError),
 }
 
-fn get_matching_kmers<T>(
-    query_reactivity: &[T],
+fn get_matching_kmers(
+    query_reactivity: &[Reactivity],
     query_sequence: &[Base],
-    db_data: &DbData<T>,
+    db_data: &DbData,
     cli: &Cli,
-) -> Result<Vec<[usize; 2]>, Error>
-where
-    T: C2CPlanExt
-        + Float
-        + NumRef
-        + Sum
-        + for<'a> Sum<&'a T>
-        + ComplexExt
-        + NumAssign
-        + NumOps<Complex<T>, Complex<T>>
-        + NumAssignRef
-        + 'static
-        + fmt::Debug,
-    for<'a> &'a T: RefNum<T>,
-    Complex<T>: AlignedAllocable + NumOps<T>,
-{
-    use num_traits::NumCast;
-
+) -> Result<Vec<[usize; 2]>, Error> {
     let &Cli {
         kmer_lookup_args:
             cli::KmerLookupArgs {
@@ -795,16 +787,9 @@ where
         ..
     } = cli;
 
-    let kmer_min_complexity = <T as NumCast>::from(kmer_min_complexity).unwrap();
-    let kmer_max_gc_diff =
-        kmer_max_gc_diff.map(|kmer_max_gc_diff| <T as NumCast>::from(kmer_max_gc_diff).unwrap());
-
     let max_sequence_distance = kmer_max_seq_dist.map(|dist| dist.to_absolute(kmer_len.into()));
     let max_gc_diff = match_kmer_gc_content.then(|| {
-        kmer_max_gc_diff.unwrap_or_else(|| {
-            T::from_f64(0.2676).unwrap()
-                * (T::from(kmer_len).unwrap() * T::from_f64(-0.053).unwrap()).exp()
-        })
+        kmer_max_gc_diff.unwrap_or_else(|| 0.2676 * (kmer_len as Reactivity * -0.053).exp())
     });
 
     let mut mass = Mass::new(db_data.reactivity.len())?;
@@ -820,18 +805,18 @@ where
             let mut complex_distances =
                 mass.run(db_data.reactivity, &db_data.transformed_reactivity, kmer)?;
             for dist in &mut *complex_distances {
-                *dist = Complex::new(dist.norm(), T::zero());
+                *dist = Complex::new(dist.norm(), 0.);
             }
 
-            let (mean_dist, stddev_dist) = mean_stddev::<Complex<T>>(&complex_distances, 1);
-            let max_distance = mean_dist.re - stddev_dist.re * T::from_f32(3.).unwrap();
+            let (mean_dist, stddev_dist) = mean_stddev(complex_distances.iter().copied(), 1);
+            let max_distance = mean_dist.re - stddev_dist.re * 3.;
 
             let kmer_gc_fraction = max_gc_diff.is_some().then(|| {
                 let gc_count = kmer_sequence
                     .iter()
                     .filter(|&&c| matches!(c, Base::C | Base::G))
                     .count();
-                <T as NumCast>::from(gc_count).unwrap() / <T as NumCast>::from(kmer_len).unwrap()
+                gc_count as Reactivity / kmer_len as Reactivity
             });
 
             let mut kmer_data = complex_distances
@@ -871,8 +856,7 @@ where
                                     .iter()
                                     .filter(|&&c| matches!(c, Base::C | Base::G))
                                     .count();
-                                let gc_fraction = <T as NumCast>::from(gc_count).unwrap()
-                                    / <T as NumCast>::from(kmer_len).unwrap();
+                                let gc_fraction = gc_count as Reactivity / kmer_len as Reactivity;
                                 Float::abs(gc_fraction - kmer_gc_fraction.unwrap()) <= max_gc_diff
                             })
                             .unwrap_or(true)
@@ -966,19 +950,21 @@ where
     diffs / (T::from(data.len()).unwrap() * sums)
 }
 
-pub(crate) fn mean_stddev<T>(data: &[T], degree_of_freedom: u8) -> (T, T)
+pub(crate) fn mean_stddev<I, T>(data: I, degree_of_freedom: u8) -> (T, T)
 where
+    I: IntoIterator<Item = T> + Clone,
     T: num_traits::NumCast + NumRef + Sum + for<'a> Sum<&'a T> + ComplexExt,
     for<'a> &'a T: RefNum<T>,
 {
     let (sample_size, sum) = data
-        .iter()
+        .clone()
+        .into_iter()
         .filter(|x| x.is_finite())
         .fold((0usize, T::zero()), |(count, sum), x| (count + 1, sum + x));
     let sample_size = T::from(sample_size).unwrap();
     let mean = sum / &sample_size;
     let var_sum: T = data
-        .iter()
+        .into_iter()
         .filter(|x| x.is_finite())
         .map(|x| (x - &mean).powi(2))
         .sum();
@@ -1086,9 +1072,11 @@ fn calc_seed_alignment_score(
 }
 
 trait SequenceEntry {
+    type Reactivity;
+
     fn name(&self) -> &str;
     fn sequence(&self) -> &[Base];
-    fn reactivity(&self) -> &[Reactivity];
+    fn reactivity(&self) -> &[Self::Reactivity];
     fn molecule(&self) -> Molecule;
 }
 
@@ -1227,12 +1215,15 @@ impl fmt::Display for ResultFileFormat<'_> {
     }
 }
 
-struct GappedReactivity<'a> {
-    reactivity: &'a [Reactivity],
+struct GappedReactivity<'a, T> {
+    reactivity: &'a [T],
     alignment: &'a AlignedSequence,
 }
 
-impl<'a> Serialize for GappedReactivity<'a> {
+impl<'a, T> Serialize for GappedReactivity<'a, T>
+where
+    T: ReactivityLike + Serialize,
+{
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -1285,11 +1276,11 @@ fn write_results_reactivity(
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
     struct Data<'a> {
-        query: GappedReactivity<'a>,
+        query: GappedReactivity<'a, Reactivity>,
         query_id: &'a str,
         query_from: usize,
         query_to: usize,
-        target: GappedReactivity<'a>,
+        target: GappedReactivity<'a, ReactivityWithPlaceholder>,
         target_id: &'a str,
         target_from: usize,
         target_to: usize,
@@ -1383,29 +1374,31 @@ mod tests {
             ..cli
         };
 
-        assert_eq!(calc_base_alignment_score(1.1, 1.2, &cli), 0.);
+        assert_eq!(calc_base_alignment_score(1.1, 1.2.into(), &cli), 0.);
         assert_eq!(
-            calc_base_alignment_score(f32::NAN, 1.2, &cli),
+            calc_base_alignment_score(f32::NAN, 1.2.into(), &cli),
             cli.alignment_args.align_match_score.0.start,
         );
         assert_eq!(
-            calc_base_alignment_score(1.1, -999., &cli),
+            calc_base_alignment_score(1.1, (-999.).into(), &cli),
             cli.alignment_args.align_match_score.0.start,
         );
-        assert!((calc_base_alignment_score(0.2, 0.4, &cli) - 1.).abs() < f32::EPSILON);
-        assert!((calc_base_alignment_score(0.4, 0.2, &cli) - 1.).abs() < f32::EPSILON);
-        assert!((calc_base_alignment_score(0.1, 0.6, &cli) + 0.5).abs() < f32::EPSILON);
+        assert!((calc_base_alignment_score(0.2, 0.4.into(), &cli) - 1.).abs() < f32::EPSILON);
+        assert!((calc_base_alignment_score(0.4, 0.2.into(), &cli) - 1.).abs() < f32::EPSILON);
+        assert!((calc_base_alignment_score(0.1, 0.6.into(), &cli) + 0.5).abs() < f32::EPSILON);
         assert!(
-            (calc_base_alignment_score(0.1, 0.8, &cli) + 2.071_428_5).abs() < f32::EPSILON * 10.
+            (calc_base_alignment_score(0.1, 0.8.into(), &cli) + 2.071_428_5).abs()
+                < f32::EPSILON * 10.
         );
         assert!(
-            (calc_base_alignment_score(0., cli.max_reactivity, &cli) + 6.).abs() < f32::EPSILON
+            (calc_base_alignment_score(0., cli.max_reactivity.into(), &cli) + 6.).abs()
+                < f32::EPSILON
         );
     }
 
     const QUERY_SEQUENCE: [u8; 200] = *b"GATGTGAAATCCCCGGGCTCAACCTGGGAACTGCATCTGATACTGGCAAGCTTGAGTCTCGTAGAGGGGGGTAGAATTCCAGGTGTAGCGGTGAAATGCGTAGAGATCTGGAGGAATACCGGTGGCGAAGGCGGCCCCCTGGACGAAGACTGACGCTCAGGTGCGAAAGCGTGGGGAGCAAACAGGATTAGATACCCTGG";
     #[allow(clippy::approx_constant)]
-    const QUERY: [f64; 200] = [
+    const QUERY: [Reactivity; 200] = [
         0.052, 0.046, 0.108, 0.241, 0.221, 1.224, 0.246, 0.846, 1.505, 0.627, 0.078, 0.002, 0.056,
         0.317, 0.114, 0.157, 0.264, 1.016, 2.925, 2.205, 1.075, 1.210, 0.191, 0.016, 0.045, 0.015,
         0.087, 0.572, 0.052, 0.157, 0.796, 2.724, 0.027, 0.000, 0.000, 0.000, 0.000, 0.000, 0.004,
@@ -1445,8 +1438,8 @@ mod tests {
            GGAGCCAGCCGCCGAAGGTGGGACAGATGATTGGGGTGAAGTCGTAACAAGGTAGCCGTATCGGAAGGTGCGGCTGGATCACCTCC\
            TTTCT";
 
-    const DB: [f64; 1553] = {
-        const NAN: f64 = f64::NAN;
+    const DB: [Reactivity; 1553] = {
+        const NAN: Reactivity = Reactivity::NAN;
         [
             NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, 0.062, 0.341, 1.105,
             0.021, 0.320, 0.000, 0.054, 0.082, 0.289, 0.665, 0.174, 0.242, 1.248, 0.718, 0.035,
@@ -2417,9 +2410,9 @@ mod tests {
     struct TestData {
         cli: Cli,
         query_sequence: [Base; QUERY_SEQUENCE.len()],
-        query: [f64; QUERY.len()],
+        query: [Reactivity; QUERY.len()],
         db_sequence: [Base; DB_SEQUENCE.len()],
-        db: [f64; DB_SEQUENCE.len()],
+        db: [ReactivityWithPlaceholder; DB_SEQUENCE.len()],
     }
 
     fn dummy_cli() -> Cli {
@@ -2445,21 +2438,16 @@ mod tests {
 
     impl TestData {
         fn new() -> Self {
-            use num_traits::NumCast;
-
             let cli = tweaked_cli();
             let query_sequence = QUERY_SEQUENCE.map(|c| Base::try_from(c).unwrap());
 
-            let query = saturate_query(QUERY, cli.max_reactivity.into());
+            let query = saturate_query(QUERY, cli.max_reactivity);
             let db_sequence = DB_SEQUENCE.map(|c| Base::try_from(c).unwrap());
             let db = DB.map(|x| {
-                if x.is_nan() {
-                    -999.
-                } else {
-                    <f64 as NumCast>::from(x)
-                        .unwrap()
-                        .min(cli.max_reactivity.into())
-                }
+                let reactivity = ReactivityWithPlaceholder::from(x);
+                reactivity.get_non_nan().map_or(reactivity, |reactivity| {
+                    reactivity.min(cli.max_reactivity).into()
+                })
             });
 
             Self {
@@ -2471,7 +2459,7 @@ mod tests {
             }
         }
 
-        fn db_data(&self) -> DbData<'_, f64> {
+        fn db_data(&self) -> DbData<'_> {
             DbData::new(&self.db_sequence, &self.db).unwrap()
         }
     }
@@ -2545,7 +2533,7 @@ mod tests {
         ]
     };
 
-    const DB2: &[f32] = &[
+    const DB2: [Reactivity; 1553] = [
         -999.000, -999.000, -999.000, -999.000, -999.000, -999.000, -999.000, -999.000, -999.000,
         -999.000, -999.000, -999.000, -999.000, 0.062, 0.341, 1.000, 0.021, 0.320, 0.000, 0.054,
         0.082, 0.289, 0.665, 0.174, 0.242, 1.000, 0.718, 0.035, 0.178, 0.000, 0.273, 0.343, 0.000,
@@ -2768,10 +2756,11 @@ mod tests {
         ];
 
         let cli = dummy_cli();
+        let db = DB2.map(ReactivityWithPlaceholder::from);
 
         for result in RESULTS {
             let query = &QUERY2[result.query_range];
-            let db = &DB2[result.db_range];
+            let db = &db[result.db_range];
 
             assert_abs_diff_eq!(
                 calc_seed_alignment_score_from_reactivity(query, db, &cli),
@@ -2886,7 +2875,7 @@ mod tests {
             .map(|index| db_file::Entry {
                 id: format!("db_{index}"),
                 sequence: vec![Base::A; 100],
-                reactivity: vec![0.5; 100],
+                reactivity: vec![ReactivityWithPlaceholder::from(0.5); 100],
             })
             .collect();
 

@@ -27,6 +27,8 @@ impl Entry {
 }
 
 impl SequenceEntry for Entry {
+    type Reactivity = Reactivity;
+
     fn name(&self) -> &str {
         &self.name
     }
@@ -35,7 +37,7 @@ impl SequenceEntry for Entry {
         &self.sequence
     }
 
-    fn reactivity(&self) -> &[Reactivity] {
+    fn reactivity(&self) -> &[Self::Reactivity] {
         &self.reactivities
     }
 

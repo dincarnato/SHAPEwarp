@@ -1,41 +1,28 @@
-use std::iter::Sum;
-
 use fftw::{
-    array::{AlignedAllocable, AlignedVec},
+    array::AlignedVec,
     plan::C2CPlan,
     types::{Flag, Sign},
 };
 use num_complex::Complex;
-use num_traits::{cast, float::FloatCore, Float, NumAssign, NumOps, NumRef, RefNum};
+use num_traits::{float::FloatCore, Float};
 
-use crate::{mean_stddev, C2CPlanExt};
+use crate::{db_file::ReactivityWithPlaceholder, mean_stddev, C2CPlanExt, Reactivity};
 
-pub(crate) struct Mass<T: C2CPlanExt> {
-    fw_plan: T::Plan,
-    bw_plan: T::Plan,
-    aligned_query: AlignedVec<Complex<T>>,
-    query_transform: AlignedVec<Complex<T>>,
-    product: AlignedVec<Complex<T>>,
-    product_inverse: AlignedVec<Complex<T>>,
+pub(crate) struct Mass {
+    fw_plan: <Reactivity as C2CPlanExt>::Plan,
+    bw_plan: <Reactivity as C2CPlanExt>::Plan,
+    aligned_query: AlignedVec<Complex<Reactivity>>,
+    query_transform: AlignedVec<Complex<Reactivity>>,
+    product: AlignedVec<Complex<Reactivity>>,
+    product_inverse: AlignedVec<Complex<Reactivity>>,
 }
 
-impl<T> Mass<T>
-where
-    T: C2CPlanExt
-        + Float
-        + NumRef
-        + Sum
-        + for<'a> Sum<&'a T>
-        + ComplexExt
-        + NumAssign
-        + NumOps<Complex<T>, Complex<T>>
-        + 'static,
-    for<'a> &'a T: RefNum<T>,
-    Complex<T>: AlignedAllocable + NumOps<T>,
-{
+impl Mass {
     pub(crate) fn new(size: usize) -> Result<Self, fftw::error::Error> {
-        let fw_plan: T::Plan = C2CPlan::aligned(&[size], Sign::Forward, Flag::ESTIMATE)?;
-        let bw_plan: T::Plan = C2CPlan::aligned(&[size], Sign::Backward, Flag::ESTIMATE)?;
+        let fw_plan: <Reactivity as C2CPlanExt>::Plan =
+            C2CPlan::aligned(&[size], Sign::Forward, Flag::ESTIMATE)?;
+        let bw_plan: <Reactivity as C2CPlanExt>::Plan =
+            C2CPlan::aligned(&[size], Sign::Backward, Flag::ESTIMATE)?;
         let aligned_query = AlignedVec::new(size);
         let query_transform = aligned_query.clone();
         let product = aligned_query.clone();
@@ -53,10 +40,10 @@ where
 
     pub(crate) fn run(
         &mut self,
-        db: &[T],
-        db_transform: &AlignedVec<Complex<T>>,
-        query: &[T],
-    ) -> Result<Vec<Complex<T>>, fftw::error::Error> {
+        db: &[ReactivityWithPlaceholder],
+        db_transform: &AlignedVec<Complex<Reactivity>>,
+        query: &[Reactivity],
+    ) -> Result<Vec<Complex<Reactivity>>, fftw::error::Error> {
         let ts_len = db_transform.len();
         let query_len = query.len();
 
@@ -79,15 +66,17 @@ where
             .c2c(&mut self.product, &mut self.product_inverse)?;
 
         // Normalize results
-        let scale_factor: T = T::one() / cast::<_, T>(ts_len).unwrap();
+        let scale_factor = 1. / (ts_len as Reactivity);
         for z in &mut *self.product_inverse {
             *z *= scale_factor;
         }
 
-        let mean_sigma_x = db.windows(query_len).map(|window| mean_stddev(window, 0));
-        let (mean_y, sigma_y) = mean_stddev(query, 0);
+        let mean_sigma_x = db
+            .windows(query_len)
+            .map(|window| mean_stddev(window.iter().map(|r| r.to_maybe_placeholder()), 0));
+        let (mean_y, sigma_y) = mean_stddev(query.iter().copied(), 0);
 
-        let query_len_float: T = cast(query_len).unwrap();
+        let query_len_float = query_len as Reactivity;
         Ok(self
             .product_inverse
             .iter()
@@ -95,7 +84,7 @@ where
             .take(ts_len.saturating_sub(query_len - 1))
             .zip(mean_sigma_x)
             .map(|(z, (mean_x, sigma_x))| {
-                let squared = T::from_f64(2.).unwrap()
+                let squared = 2.
                     * (query_len_float
                         - (z - query_len_float * mean_x * mean_y) / (sigma_x * sigma_y));
                 squared.sqrt()
@@ -164,7 +153,7 @@ mod tests {
 
     #[test]
     fn test_mass() {
-        let ts = [1f64, 1., 1., 2., 1., 1., 4., 5.];
+        let ts = [1., 1., 1., 2., 1., 1., 4., 5.].map(ReactivityWithPlaceholder::from);
         let ts_t = transform_db(&ts).unwrap();
         let query = [2., 1., 1., 4.];
         let result = Mass::new(ts.len())
@@ -172,12 +161,12 @@ mod tests {
             .run(ts.as_ref(), &ts_t, query.as_ref())
             .unwrap();
 
-        const EXPECTED: [Complex<f64>; 5] = [
-            Complex::new(0.67640791, -1.37044402e-16),
-            Complex::new(3.43092352, 0.00000000e+00),
-            Complex::new(3.43092352, 1.02889035e-17),
-            Complex::new(0., 0.),
-            Complex::new(1.85113597, 1.21452707e-17),
+        const EXPECTED: [Complex<Reactivity>; 5] = [
+            Complex::new(0.67640823, 0.),
+            Complex::new(3.4309235, 0.),
+            Complex::new(3.4309235, 0.),
+            Complex::new(0.00069053395, 0.),
+            Complex::new(1.8511361, 0.),
         ];
 
         assert_abs_diff_eq!(&*result, EXPECTED.as_ref(), epsilon = 1e-7);
