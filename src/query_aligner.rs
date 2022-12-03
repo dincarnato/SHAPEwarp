@@ -3,13 +3,14 @@ use std::{
     marker::PhantomData,
     mem,
     num::NonZeroUsize,
-    ops::{self, Not},
+    ops::{self, Not, Range, RangeInclusive},
     sync::Arc,
 };
 
 use crate::{
     aligner::{
-        calc_seed_align_tolerance, AlignBehavior, AlignParams, Aligner, AlignmentResult, Direction,
+        calc_seed_align_tolerance, trimmed_range, AlignBehavior, AlignParams, Aligner,
+        AlignmentResult, Direction,
     },
     calc_seed_alignment_score,
     cli::Cli,
@@ -276,8 +277,13 @@ where
     let seed_length = NonZeroUsize::new(seed_length)
         .expect("seed must have a length greater than zero (and more)");
 
-    let query_len = query_entry.sequence().len();
-    let db_len = db_entry.sequence().len();
+    let trimmed_query_range = trimmed_range(query_entry.reactivity());
+    let trimmed_db_range = trimmed_range(db_entry.reactivity());
+    let query_len = trimmed_query_range.len();
+    let db_len = trimmed_db_range.len();
+    let query = intersect_range(query, trimmed_query_range);
+    let db = intersect_range(db, trimmed_db_range);
+
     let align_tolerance = calc_seed_align_tolerance(
         query.clone(),
         db.clone(),
@@ -337,4 +343,11 @@ where
         query,
         alignment,
     }
+}
+
+#[inline]
+fn intersect_range(a: RangeInclusive<usize>, b: Range<usize>) -> RangeInclusive<usize> {
+    let start = *a.start().max(&b.start);
+    let end = *a.end().min(&b.end.saturating_sub(1));
+    start..=end
 }

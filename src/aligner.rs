@@ -10,7 +10,7 @@ use ndarray::{s, Array2};
 use crate::{
     calc_base_alignment_score,
     cli::{AlignmentArgs, Cli},
-    db_file::{self, ReactivityWithPlaceholder},
+    db_file::{self, ReactivityLike, ReactivityWithPlaceholder},
     get_sequence_base_alignment_score, query_file, Base, Reactivity, SequenceEntry,
 };
 
@@ -208,36 +208,42 @@ impl<'a> Aligner<'a> {
             direction,
         } = params;
 
+        let trimmed_query_range = trimmed_range(query.reactivity());
+        let trimmed_target_range = trimmed_range(target.reactivity());
+
         match direction {
             Direction::Downstream => {
-                let query_len = query.reactivity().len();
-                let target_len = target.reactivity().len();
-
-                let query_start = (*query_range.end() + 1).min(query_len);
-                let target_start = (*target_range.end() + 1).min(target_len);
+                let query_start = (*query_range.end() + 1).min(trimmed_query_range.end);
+                let target_start = (*target_range.end() + 1).min(trimmed_target_range.end);
                 let tolerance = align_tolerance.downstream;
                 let query = EntrySlice::forward(
                     query,
-                    query_start..query_len.min(query_start.saturating_add(tolerance)),
+                    query_start
+                        ..trimmed_query_range
+                            .end
+                            .min(query_start.saturating_add(tolerance)),
                 );
                 let target = EntrySlice::forward(
                     target,
-                    target_start..target_len.min(target_start.saturating_add(tolerance)),
+                    target_start
+                        ..trimmed_target_range
+                            .end
+                            .min(target_start.saturating_add(tolerance)),
                 );
 
                 if query.is_empty() || target.is_empty() {
                     return AlignResult {
-                        query_index: *query_range.end(),
+                        query_index: query_start.saturating_sub(1),
                         query_alignment: Default::default(),
-                        target_index: *target_range.end(),
+                        target_index: target_start.saturating_sub(1),
                         target_alignment: Default::default(),
                         score: seed_score,
                     };
                 }
 
                 let best_cell = self.handle_slices(&query, &target, seed_score);
-                let target_index = target_range.end() + best_cell[0];
-                let query_index = query_range.end() + best_cell[1];
+                let target_index = target_start + best_cell[0] - 1;
+                let query_index = query_start + best_cell[1] - 1;
                 let score = self.matrix[best_cell].score;
                 let AlignmentResult {
                     query: query_alignment,
@@ -255,26 +261,30 @@ impl<'a> Aligner<'a> {
 
             Direction::Upstream => {
                 let tolerance = align_tolerance.upstream;
-                let query_end = *query_range.start();
-                let target_end = *target_range.start();
-                let query_start = query_end.saturating_sub(tolerance);
-                let target_start = target_end.saturating_sub(tolerance);
+                let query_end = (*query_range.start()).max(trimmed_query_range.start);
+                let target_end = (*target_range.start()).max(trimmed_target_range.start);
+                let query_start = query_end
+                    .saturating_sub(tolerance)
+                    .min(trimmed_query_range.end);
+                let target_start = target_end
+                    .saturating_sub(tolerance)
+                    .min(trimmed_target_range.end);
                 let query = EntrySlice::backward(query, query_start..query_end);
                 let target = EntrySlice::backward(target, target_start..target_end);
 
                 if query.is_empty() || target.is_empty() {
                     return AlignResult {
-                        query_index: query_range.start().saturating_sub(1),
+                        query_index: query_end.saturating_sub(1),
                         query_alignment: Default::default(),
-                        target_index: target_range.start().saturating_sub(1),
+                        target_index: target_end.saturating_sub(1),
                         target_alignment: Default::default(),
                         score: seed_score,
                     };
                 }
 
                 let best_cell = self.handle_slices(&query, &target, seed_score);
-                let target_index = target_range.start().checked_sub(best_cell[0]).unwrap();
-                let query_index = query_range.start().checked_sub(best_cell[1]).unwrap();
+                let target_index = target_end.checked_sub(best_cell[0]).unwrap();
+                let query_index = query_end.checked_sub(best_cell[1]).unwrap();
                 let score = self.matrix[best_cell].score;
                 let AlignmentResult {
                     query: query_alignment,
@@ -828,6 +838,22 @@ pub(crate) fn calc_seed_align_tolerance(
     AlignTolerance {
         upstream,
         downstream,
+    }
+}
+
+pub fn trimmed_range<T: ReactivityLike>(reactivities: &[T]) -> Range<usize> {
+    match reactivities.iter().copied().position(|x| x.is_nan().not()) {
+        Some(start) => {
+            let new_range = &reactivities[start..];
+            let end_offset = new_range
+                .iter()
+                .copied()
+                .rposition(|x| x.is_nan().not())
+                .map(|x| x + 1)
+                .unwrap_or(new_range.len());
+            start..(start + end_offset)
+        }
+        None => 0..(reactivities.len()),
     }
 }
 
@@ -1417,5 +1443,32 @@ mod tests {
             merge,
             aln_seq!(x - - x x - x - - - x x - x - x x x x x x - x x - - x - x x x x)
         );
+    }
+
+    #[test]
+    fn trimmed_range_no_trimming() {
+        let data = [1., 2., 3., 4., 5.];
+        assert_eq!(trimmed_range(&data), 0..5);
+    }
+
+    #[test]
+    fn trimmed_range_start() {
+        use std::f32::NAN;
+        let data = [NAN, NAN, 1., NAN, 3., 4., 5.];
+        assert_eq!(trimmed_range(&data), 2..7);
+    }
+
+    #[test]
+    fn trimmed_range_end() {
+        use std::f32::NAN;
+        let data = [1., NAN, 3., 4., 5., NAN, NAN];
+        assert_eq!(trimmed_range(&data), 0..5);
+    }
+
+    #[test]
+    fn trimmed_range_both() {
+        use std::f32::NAN;
+        let data = [NAN, NAN, NAN, 1., NAN, 3., 4., 5., NAN, NAN];
+        assert_eq!(trimmed_range(&data), 3..8);
     }
 }
