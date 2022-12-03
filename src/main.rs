@@ -1110,19 +1110,12 @@ fn remove_overlapping_results(
         .enumerate()
         .flat_map(|(a_index, (a, rest))| {
             let same_db_index = rest.partition_point(|b| a.0.db_entry.id == b.0.db_entry.id);
-            let a_len = a.0.query_len() as f64;
+            // TODO: check if pre-calculating `a_len` does change anything
             rest[..same_db_index]
                 .iter()
                 .enumerate()
-                .take_while(move |(_, b)| {
-                    b.0.query.start() < a.0.query.end() && {
-                        let overlap_start = *a.0.query.start().max(b.0.query.start());
-                        let overlap_end = *a.0.query.end().min(b.0.query.end());
-                        let b_len = b.0.query_len() as f64;
-                        (overlap_end + 1).saturating_sub(overlap_start) as f64
-                            > (a_len.min(b_len)) * max_align_overlap
-                    }
-                })
+                .take_while(|(_, b)| are_overlapping(&a.0.query, &b.0.query, max_align_overlap))
+                .filter(|(_, b)| are_overlapping(&a.0.db, &b.0.db, max_align_overlap))
                 .map(move |(b_offset, b)| (a_index, a_index + b_offset + 1, a.0.score, b.0.score))
         })
         .for_each(|(a_index, b_index, a_score, b_score)| {
@@ -1356,6 +1349,31 @@ enum Molecule {
     Rna,
     #[default]
     Unknown,
+}
+
+#[inline]
+fn overlapping_range<T>(a: &RangeInclusive<T>, b: &RangeInclusive<T>) -> RangeInclusive<T>
+where
+    T: Ord + Clone,
+{
+    let start = a.start().max(b.start()).clone();
+    let end = a.end().min(b.end()).clone();
+    start..=end
+}
+
+#[inline]
+fn are_overlapping(
+    a: &RangeInclusive<usize>,
+    b: &RangeInclusive<usize>,
+    max_align_overlap: f64,
+) -> bool {
+    b.start() < a.end() && {
+        let overlap = overlapping_range(a, b);
+        let a_len = (a.end() + 1 - a.start()) as f64;
+        let b_len = (b.end() + 1 - b.start()) as f64;
+        (overlap.end() + 1).saturating_sub(*overlap.start()) as f64
+            > (a_len.min(b_len)) * max_align_overlap
+    }
 }
 
 #[cfg(test)]
@@ -2790,7 +2808,7 @@ mod tests {
                         query: 0..=0,
                     },
                     score: $score,
-                    db: 0..=0,
+                    db: 0..=10,
                     query: $query,
                     alignment: Default::default(),
                 },
@@ -2924,6 +2942,25 @@ mod tests {
                 .map(|index| 15. + (index as f32) * 3.)
                 .collect::<Vec<_>>()
         )
+    }
+
+    #[test]
+    fn keep_targets_with_overlapping_results_different_target() {
+        let mut results = vec![
+            query_result!(0..=4),
+            (
+                QueryAlignResult {
+                    db: 15..=20,
+                    ..(query_result!(0..=4).0)
+                },
+                0.,
+                0.,
+            ),
+        ];
+        let initial_results = results.clone();
+        remove_overlapping_results(&mut results, &mut vec![0, 1, 2, 3, 4], &dummy_cli());
+
+        assert_eq!(results, initial_results);
     }
 
     #[test]

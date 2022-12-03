@@ -258,13 +258,6 @@ where
     }
 }
 
-impl<Alignment> QueryAlignResult<'_, Alignment> {
-    #[inline]
-    pub(crate) fn query_len(&self) -> usize {
-        self.query.end() + 1 - self.query.start()
-    }
-}
-
 fn handle_match<'db, 'cli, Behavior>(
     db_match: MatchRanges,
     query_entry: &query_file::Entry,
