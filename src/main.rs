@@ -182,6 +182,9 @@ fn main() -> anyhow::Result<()> {
             ReportAlignment::Fasta => {
                 results
                     .iter()
+                    .filter(|result| {
+                        matches!(result.status, QueryResultStatus::PassInclusionEvalue)
+                    })
                     .try_for_each(|result| {
                         fasta::write_result(result, &db_entries, &query_entries, &alignments_path)
                     })
@@ -1264,39 +1267,42 @@ fn write_results_reactivity(
     fs::create_dir_all(&reactivities_path)
         .context("Unable to create output reactivities directory")?;
 
-    let mut iter = results.iter().map(|result| {
-        let query_entry = query_entries
-            .iter()
-            .find(|query| query.name() == &*result.query)
-            .expect("query must be available in queries");
+    let mut iter = results
+        .iter()
+        .filter(|result| matches!(result.status, QueryResultStatus::PassInclusionEvalue))
+        .map(|result| {
+            let query_entry = query_entries
+                .iter()
+                .find(|query| query.name() == &*result.query)
+                .expect("query must be available in queries");
 
-        let db_entry = db_entries
-            .iter()
-            .find(|db| db.name() == result.db_entry)
-            .expect("target must be available in db");
+            let db_entry = db_entries
+                .iter()
+                .find(|db| db.name() == result.db_entry)
+                .expect("target must be available in db");
 
-        let query = &query_entry.reactivity()[result.query_start..=result.query_end];
-        let target = &db_entry.reactivity()[result.db_start..=result.db_end];
+            let query = &query_entry.reactivity()[result.query_start..=result.query_end];
+            let target = &db_entry.reactivity()[result.db_start..=result.db_end];
 
-        let data = Data {
-            query: GappedReactivity {
-                reactivity: query,
-                alignment: &result.alignment.query,
-            },
-            query_id: query_entry.name(),
-            query_from: result.query_start,
-            query_to: result.query_end,
-            target: GappedReactivity {
-                reactivity: target,
-                alignment: &result.alignment.target,
-            },
-            target_id: db_entry.name(),
-            target_from: result.db_start,
-            target_to: result.db_end,
-        };
+            let data = Data {
+                query: GappedReactivity {
+                    reactivity: query,
+                    alignment: &result.alignment.query,
+                },
+                query_id: query_entry.name(),
+                query_from: result.query_start,
+                query_to: result.query_end,
+                target: GappedReactivity {
+                    reactivity: target,
+                    alignment: &result.alignment.target,
+                },
+                target_id: db_entry.name(),
+                target_from: result.db_start,
+                target_to: result.db_end,
+            };
 
-        (result, data)
-    });
+            (result, data)
+        });
 
     let (result, data) = match iter.next() {
         Some(result) => result,
