@@ -102,8 +102,20 @@ fn main() -> anyhow::Result<()> {
         })
         .collect();
 
-    let db_entries_shuffled =
-        make_shuffled_db(&db_entries, db_block_size.into(), db_shufflings.into());
+    let db_entries_shuffled = cli
+        .shuffled_db
+        .as_deref()
+        .map(|shuffled_db_path| {
+            let mut shuffled_db = db_file::read_file(shuffled_db_path)?;
+            shuffled_db
+                .iter_mut()
+                .for_each(|entry| entry.cap_reactivities(cli.max_reactivity));
+            Ok::<_, db_file::Error>(shuffled_db)
+        })
+        .transpose()?
+        .unwrap_or_else(|| {
+            make_shuffled_db(&db_entries, db_block_size.into(), db_shufflings.into())
+        });
 
     let mut results = query_entries
         .par_iter()

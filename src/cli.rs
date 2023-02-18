@@ -22,6 +22,13 @@ pub struct Cli {
     #[serde(skip)]
     pub database: PathBuf,
 
+    /// Path of the shuffled database.
+    ///
+    /// Use a file containing the shuffled db instead of the one generated on the fly.
+    #[clap(long)]
+    #[serde(skip)]
+    pub shuffled_db: Option<PathBuf>,
+
     /// Path to the query file
     ///
     /// Note: each entry should contain (one per row) the sequence id, the nucleotide sequence and
