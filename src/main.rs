@@ -856,6 +856,7 @@ where
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize)]
+#[serde(untagged)]
 pub enum Distance<T> {
     Integral(T),
     Fractional(f64),
