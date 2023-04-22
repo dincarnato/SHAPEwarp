@@ -2,6 +2,7 @@ use std::{
     convert::TryInto,
     fs::File,
     io::{self, BufReader, Read, Seek, SeekFrom},
+    mem,
     path::Path,
 };
 
@@ -78,6 +79,7 @@ pub struct Entry {
 const NAN_PLACEHOLDER: Reactivity = -999.;
 
 #[derive(Debug, Clone, Copy, Deserialize)]
+#[repr(transparent)]
 pub struct ReactivityWithPlaceholder(Reactivity);
 
 impl ReactivityWithPlaceholder {
@@ -99,6 +101,13 @@ impl ReactivityWithPlaceholder {
         } else {
             self.0
         }
+    }
+
+    pub fn as_inner_slice(this: &[ReactivityWithPlaceholder]) -> &[Reactivity] {
+        // Safety:
+        // - `ReactivityWithPlaceholder` is transparent and it contains only a `Reactivity`
+        // - lifetime is maintained
+        unsafe { mem::transmute(this) }
     }
 }
 

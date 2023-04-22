@@ -294,14 +294,15 @@ impl<'a> Aligner<'a> {
 
     fn handle_slices<'b, const FW: bool>(
         &mut self,
-        query: &'b EntrySlice<'b, Reactivity, FW>,
+        query: &'b EntrySlice<'b, ReactivityWithPlaceholder, FW>,
         target: &'b EntrySlice<'b, ReactivityWithPlaceholder, FW>,
         seed_score: Reactivity,
     ) -> [usize; 2]
     where
-        &'b EntrySlice<'b, Reactivity, FW>: IntoIterator<Item = EntryElement<Reactivity>>,
-        EntrySlice<'b, Reactivity, FW>:
-            IntoIterator<Item = EntryElement<Reactivity>> + EntrySliceExt<Reactivity>,
+        &'b EntrySlice<'b, ReactivityWithPlaceholder, FW>:
+            IntoIterator<Item = EntryElement<ReactivityWithPlaceholder>>,
+        EntrySlice<'b, ReactivityWithPlaceholder, FW>: IntoIterator<Item = EntryElement<ReactivityWithPlaceholder>>
+            + EntrySliceExt<ReactivityWithPlaceholder>,
         &'b EntrySlice<'b, ReactivityWithPlaceholder, FW>:
             IntoIterator<Item = EntryElement<ReactivityWithPlaceholder>>,
         EntrySlice<'b, ReactivityWithPlaceholder, FW>: IntoIterator<Item = EntryElement<ReactivityWithPlaceholder>>
@@ -317,13 +318,14 @@ impl<'a> Aligner<'a> {
     #[inline(always)]
     fn create_matrix<'b, const FW: bool>(
         &mut self,
-        query: &'b EntrySlice<'b, Reactivity, FW>,
+        query: &'b EntrySlice<'b, ReactivityWithPlaceholder, FW>,
         target: &'b EntrySlice<'b, ReactivityWithPlaceholder, FW>,
     ) -> Array2<Cell>
     where
-        &'b EntrySlice<'b, Reactivity, FW>: IntoIterator<Item = EntryElement<Reactivity>>,
-        EntrySlice<'b, Reactivity, FW>:
-            IntoIterator<Item = EntryElement<Reactivity>> + EntrySliceExt<Reactivity>,
+        &'b EntrySlice<'b, ReactivityWithPlaceholder, FW>:
+            IntoIterator<Item = EntryElement<ReactivityWithPlaceholder>>,
+        EntrySlice<'b, ReactivityWithPlaceholder, FW>: IntoIterator<Item = EntryElement<ReactivityWithPlaceholder>>
+            + EntrySliceExt<ReactivityWithPlaceholder>,
         &'b EntrySlice<'b, ReactivityWithPlaceholder, FW>:
             IntoIterator<Item = EntryElement<ReactivityWithPlaceholder>>,
         EntrySlice<'b, ReactivityWithPlaceholder, FW>: IntoIterator<Item = EntryElement<ReactivityWithPlaceholder>>
@@ -385,13 +387,14 @@ impl<'a> Aligner<'a> {
 
     fn align_diagonal_band<'b, const FW: bool>(
         &mut self,
-        query: &'b EntrySlice<'b, Reactivity, FW>,
+        query: &'b EntrySlice<'b, ReactivityWithPlaceholder, FW>,
         target: &'b EntrySlice<'b, ReactivityWithPlaceholder, FW>,
     ) -> [usize; 2]
     where
-        &'b EntrySlice<'b, Reactivity, FW>: IntoIterator<Item = EntryElement<Reactivity>>,
-        EntrySlice<'b, Reactivity, FW>:
-            IntoIterator<Item = EntryElement<Reactivity>> + EntrySliceExt<Reactivity>,
+        &'b EntrySlice<'b, ReactivityWithPlaceholder, FW>:
+            IntoIterator<Item = EntryElement<ReactivityWithPlaceholder>>,
+        EntrySlice<'b, ReactivityWithPlaceholder, FW>: IntoIterator<Item = EntryElement<ReactivityWithPlaceholder>>
+            + EntrySliceExt<ReactivityWithPlaceholder>,
         &'b EntrySlice<'b, ReactivityWithPlaceholder, FW>:
             IntoIterator<Item = EntryElement<ReactivityWithPlaceholder>>,
         EntrySlice<'b, ReactivityWithPlaceholder, FW>: IntoIterator<Item = EntryElement<ReactivityWithPlaceholder>>
@@ -427,7 +430,7 @@ impl<'a> Aligner<'a> {
         let state = State::new(initial_score, [0, 0], alignment_args);
 
         let calc_alignment_score = if alignment_args.align_score_seq {
-            |query: &EntryElement<Reactivity>,
+            |query: &EntryElement<ReactivityWithPlaceholder>,
              target: &EntryElement<ReactivityWithPlaceholder>,
              cli: &Cli| {
                 calc_base_alignment_score(query.reactivity, target.reactivity, cli)
@@ -438,7 +441,7 @@ impl<'a> Aligner<'a> {
                     )
             }
         } else {
-            |query: &EntryElement<Reactivity>,
+            |query: &EntryElement<ReactivityWithPlaceholder>,
              target: &EntryElement<ReactivityWithPlaceholder>,
              cli: &Cli| {
                 calc_base_alignment_score(query.reactivity, target.reactivity, cli)

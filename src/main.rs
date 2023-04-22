@@ -623,7 +623,7 @@ impl fmt::Display for Sequence<'_> {
 pub struct InvalidEncodedBase;
 
 fn calc_seed_alignment_score_from_reactivity(
-    query: &[Reactivity],
+    query: &[ReactivityWithPlaceholder],
     target: &[ReactivityWithPlaceholder],
     cli: &Cli,
 ) -> f32 {
@@ -650,7 +650,7 @@ fn calc_seed_alignment_score_from_sequence(query: &[Base], target: &[Base], cli:
 
 #[inline]
 fn calc_base_alignment_score(
-    query: Reactivity,
+    query: ReactivityWithPlaceholder,
     target: ReactivityWithPlaceholder,
     cli: &Cli,
 ) -> f32 {
@@ -665,24 +665,19 @@ fn calc_base_alignment_score(
         ..
     } = cli;
 
-    match target.get_non_nan() {
-        Some(target) => {
-            if query.is_nan() {
-                align_match.start
-            } else if query > 1. && target > 1. {
-                0f32
+    match (target.get_non_nan(), query.get_non_nan()) {
+        (None, _) | (_, None) => align_match.start,
+        (Some(target), Some(query)) if query > 1. && target > 1. => 0f32,
+        (Some(target), Some(query)) => {
+            let diff = (query - target).abs();
+            if diff < 0.5 {
+                (0.5 - diff) * (align_match.end - align_match.start) / 0.5 + align_match.start
             } else {
-                let diff = (query - target).abs();
-                if diff < 0.5 {
-                    (0.5 - diff) * (align_match.end - align_match.start) / 0.5 + align_match.start
-                } else {
-                    (max_reactivity - diff) * (align_mismatch.end - align_mismatch.start)
-                        / (max_reactivity - 0.5)
-                        + align_mismatch.start
-                }
+                (max_reactivity - diff) * (align_mismatch.end - align_mismatch.start)
+                    / (max_reactivity - 0.5)
+                    + align_mismatch.start
             }
         }
-        None => align_match.start,
     }
 }
 
@@ -767,7 +762,7 @@ pub enum Error {
 }
 
 fn get_matching_kmers(
-    query_reactivity: &[Reactivity],
+    query_reactivity: &[ReactivityWithPlaceholder],
     query_sequence: &[Base],
     db_data: &DbData,
     cli: &Cli,
@@ -799,11 +794,16 @@ fn get_matching_kmers(
         .zip(query_sequence.windows(kmer_len.into()))
         .enumerate()
         .step_by(kmer_offset.into())
-        .filter(|(_, (kmer, _))| kmer.iter().any(|&x| Float::is_nan(x)).not())
-        .filter(|(_, (kmer, _))| gini_index(kmer) >= kmer_min_complexity)
+        .filter(|(_, (kmer, _))| kmer.iter().any(|&x| x.is_nan()).not())
+        .filter(|(_, (kmer, _))| {
+            gini_index(ReactivityWithPlaceholder::as_inner_slice(kmer)) >= kmer_min_complexity
+        })
         .map(|(kmer_index, (kmer, kmer_sequence))| {
-            let mut complex_distances =
-                mass.run(db_data.reactivity, &db_data.transformed_reactivity, kmer)?;
+            let mut complex_distances = mass.run(
+                db_data.reactivity,
+                &db_data.transformed_reactivity,
+                ReactivityWithPlaceholder::as_inner_slice(kmer),
+            )?;
             for dist in &mut *complex_distances {
                 *dist = Complex::new(dist.norm(), 0.);
             }
@@ -1269,7 +1269,7 @@ fn write_results_reactivity(
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
     struct Data<'a> {
-        query: GappedReactivity<'a, Reactivity>,
+        query: GappedReactivity<'a, ReactivityWithPlaceholder>,
         query_id: &'a str,
         query_from: usize,
         query_to: usize,
@@ -1392,24 +1392,30 @@ mod tests {
             ..cli
         };
 
-        assert_eq!(calc_base_alignment_score(1.1, 1.2.into(), &cli), 0.);
+        assert_eq!(calc_base_alignment_score(1.1.into(), 1.2.into(), &cli), 0.);
         assert_eq!(
-            calc_base_alignment_score(f32::NAN, 1.2.into(), &cli),
+            calc_base_alignment_score(f32::NAN.into(), 1.2.into(), &cli),
             cli.alignment_args.align_match_score.0.start,
         );
         assert_eq!(
-            calc_base_alignment_score(1.1, (-999.).into(), &cli),
+            calc_base_alignment_score(1.1.into(), (-999.).into(), &cli),
             cli.alignment_args.align_match_score.0.start,
         );
-        assert!((calc_base_alignment_score(0.2, 0.4.into(), &cli) - 1.).abs() < f32::EPSILON);
-        assert!((calc_base_alignment_score(0.4, 0.2.into(), &cli) - 1.).abs() < f32::EPSILON);
-        assert!((calc_base_alignment_score(0.1, 0.6.into(), &cli) + 0.5).abs() < f32::EPSILON);
         assert!(
-            (calc_base_alignment_score(0.1, 0.8.into(), &cli) + 2.071_428_5).abs()
+            (calc_base_alignment_score(0.2.into(), 0.4.into(), &cli) - 1.).abs() < f32::EPSILON
+        );
+        assert!(
+            (calc_base_alignment_score(0.4.into(), 0.2.into(), &cli) - 1.).abs() < f32::EPSILON
+        );
+        assert!(
+            (calc_base_alignment_score(0.1.into(), 0.6.into(), &cli) + 0.5).abs() < f32::EPSILON
+        );
+        assert!(
+            (calc_base_alignment_score(0.1.into(), 0.8.into(), &cli) + 2.071_428_5).abs()
                 < f32::EPSILON * 10.
         );
         assert!(
-            (calc_base_alignment_score(0., cli.max_reactivity.into(), &cli) + 6.).abs()
+            (calc_base_alignment_score(0f32.into(), cli.max_reactivity.into(), &cli) + 6.).abs()
                 < f32::EPSILON
         );
     }
@@ -2428,7 +2434,7 @@ mod tests {
     struct TestData {
         cli: Cli,
         query_sequence: [Base; QUERY_SEQUENCE.len()],
-        query: [Reactivity; QUERY.len()],
+        query: [ReactivityWithPlaceholder; QUERY.len()],
         db_sequence: [Base; DB_SEQUENCE.len()],
         db: [ReactivityWithPlaceholder; DB_SEQUENCE.len()],
     }
@@ -2459,7 +2465,8 @@ mod tests {
             let cli = tweaked_cli();
             let query_sequence = QUERY_SEQUENCE.map(|c| Base::try_from(c).unwrap());
 
-            let query = saturate_query(QUERY, cli.max_reactivity);
+            let query =
+                saturate_query(QUERY, cli.max_reactivity).map(ReactivityWithPlaceholder::from);
             let db_sequence = DB_SEQUENCE.map(|c| Base::try_from(c).unwrap());
             let db = DB.map(|x| {
                 let reactivity = ReactivityWithPlaceholder::from(x);
@@ -2528,9 +2535,9 @@ mod tests {
         assert!(query[2] < 0. && query[2].is_infinite());
     }
 
-    const QUERY2: &[f32] = {
+    const QUERY2: [f32; 200] = {
         use std::f32::NAN;
-        &[
+        [
             0.885, 0.181, 0.189, 0.239, 0.531, 0.141, 0.126, 0.491, 0.648, 0.114, 0.171, 0.332,
             0.099, 0.601, 0.849, 1.000, 0.928, 0.221, 0.464, 0.482, 0.398, 0.082, 0.079, 0.141,
             0.649, 0.419, 0.172, 0.242, 0.391, 0.000, 0.000, 0.005, 0.220, 0.022, 0.270, 0.195,
@@ -2774,10 +2781,11 @@ mod tests {
         ];
 
         let cli = dummy_cli();
+        let query = QUERY2.map(ReactivityWithPlaceholder::from);
         let db = DB2.map(ReactivityWithPlaceholder::from);
 
         for result in RESULTS {
-            let query = &QUERY2[result.query_range];
+            let query = &query[result.query_range];
             let db = &db[result.db_range];
 
             assert_abs_diff_eq!(

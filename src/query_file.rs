@@ -6,28 +6,28 @@ use std::{
     sync::Arc,
 };
 
-use crate::{Base, Molecule, Reactivity, SequenceEntry};
+use crate::{db_file::ReactivityWithPlaceholder, Base, Molecule, Reactivity, SequenceEntry};
 
 #[derive(Debug, Clone)]
 pub struct Entry {
     pub name: Arc<str>,
     sequence: Vec<Base>,
-    reactivities: Vec<Reactivity>,
+    reactivities: Vec<ReactivityWithPlaceholder>,
     pub(crate) molecule: Molecule,
 }
 
 impl Entry {
     pub fn cap_reactivities(&mut self, max_reactivity: Reactivity) {
         self.reactivities.iter_mut().for_each(|reactivity| {
-            if reactivity.is_nan().not() {
-                *reactivity = reactivity.min(max_reactivity)
+            if let Some(x) = reactivity.get_non_nan() {
+                *reactivity = x.min(max_reactivity).into();
             }
         });
     }
 }
 
 impl SequenceEntry for Entry {
-    type Reactivity = Reactivity;
+    type Reactivity = ReactivityWithPlaceholder;
 
     fn name(&self) -> &str {
         &self.name
@@ -171,14 +171,17 @@ where
                 }
 
                 let reactivity = if raw_reactivity.eq_ignore_ascii_case("NaN") {
-                    Reactivity::NAN
+                    ReactivityWithPlaceholder::from(Reactivity::NAN)
                 } else {
-                    raw_reactivity.parse::<Reactivity>().map_err(|_| {
-                        Error::InvalidReactivity(Box::new(RowColumn {
-                            row: file_row,
-                            column,
-                        }))
-                    })?
+                    raw_reactivity
+                        .parse::<Reactivity>()
+                        .map(ReactivityWithPlaceholder::from)
+                        .map_err(|_| {
+                            Error::InvalidReactivity(Box::new(RowColumn {
+                                row: file_row,
+                                column,
+                            }))
+                        })?
                 };
 
                 column += raw_reactivity.len();
@@ -249,14 +252,14 @@ mod tests {
 
     fn reactivities_eq<I1, I2>(a: I1, b: I2) -> bool
     where
-        I1: IntoIterator<Item = Reactivity>,
+        I1: IntoIterator<Item = ReactivityWithPlaceholder>,
         I2: IntoIterator<Item = Reactivity>,
     {
         a.into_iter().zip(b).all(|(a, b)| {
             if b.is_nan() {
                 a.is_nan()
             } else {
-                (a - b).abs() < 10e-5
+                (a.to_maybe_placeholder() - b).abs() < 10e-5
             }
         })
     }
