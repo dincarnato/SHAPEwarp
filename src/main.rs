@@ -24,7 +24,7 @@ use std::{
 use aligner::{AlignedSequence, Aligner, AlignmentResult, BaseOrGap, NoOpBehavior};
 use anyhow::Context;
 use clap::Parser;
-use cli::{AlignmentFoldingEvaluationArgs, MinMax};
+use cli::MinMax;
 use db_file::{ReactivityLike, ReactivityWithPlaceholder};
 use fftw::{
     array::AlignedVec,
@@ -55,15 +55,11 @@ fn main() -> anyhow::Result<()> {
     let Cli {
         overwrite,
         ref output,
-        alignment_folding_eval_args:
-            AlignmentFoldingEvaluationArgs {
-                block_size,
-                shufflings,
-                ..
-            },
         threads,
         report_alignment,
         report_reactivity,
+        db_shufflings,
+        db_block_size,
         ..
     } = cli;
 
@@ -106,7 +102,8 @@ fn main() -> anyhow::Result<()> {
         })
         .collect();
 
-    let db_entries_shuffled = make_shuffled_db(&db_entries, block_size.into(), shufflings.into());
+    let db_entries_shuffled =
+        make_shuffled_db(&db_entries, db_block_size.into(), db_shufflings.into());
 
     let mut results = query_entries
         .par_iter()

@@ -44,6 +44,18 @@ pub struct Cli {
     #[clap(long)]
     pub threads: Option<u16>,
 
+    /// Number of shufflings to perform for each sequence in db
+    #[clap(long, alias = "dbShufflings", default_value_t = 100)]
+    pub db_shufflings: u16,
+
+    /// Size (in nt) of the blocks for shuffling the sequences in db
+    #[clap(long, alias = "dbBlockSize", default_value_t = 10)]
+    pub db_block_size: u16,
+
+    /// Besides shuffling blocks, residues within each block in db will be shuffled as well
+    #[clap(long, alias = "dbInBlockShuffle")]
+    pub db_in_block_shuffle: bool,
+
     /// Maximum value to which reactivities will be capped
     #[clap(long, default_value_t = 1., alias = "maxReactivity")]
     pub max_reactivity: Reactivity,
@@ -296,15 +308,16 @@ pub struct AlignmentFoldingEvaluationArgs {
     #[clap(long, alias = "evalAlignFold")]
     pub eval_align_fold: bool,
 
-    /// Number of shufflings to perform for each alignment
+    /// Number of shufflings to perform for each alignment during folding evaluation
     #[clap(long, default_value_t = 100)]
     pub shufflings: u16,
 
-    /// Size (in nt) of the blocks for shuffling the alignment
+    /// Size (in nt) of the blocks for shuffling the alignment during folding evaluation
     #[clap(long, alias = "blockSize", default_value_t = 3)]
     pub block_size: u16,
 
-    /// Besides shuffling blocks, residues within each block will be shuffled as well
+    /// Besides shuffling blocks, residues within each block will be shuffled as well during
+    /// folding evaluation
     #[clap(long, alias = "inBlockShuffle")]
     pub in_block_shuffle: bool,
 
