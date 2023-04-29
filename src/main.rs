@@ -12,7 +12,7 @@ use std::{
     cmp::Reverse,
     fmt::{self, Write},
     fs::{self, File},
-    io,
+    io::{self, BufWriter},
     iter::Sum,
     num::ParseFloatError,
     ops::{self, Not, RangeInclusive},
@@ -116,6 +116,17 @@ fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|| {
             make_shuffled_db(&db_entries, db_block_size.into(), db_shufflings.into())
         });
+
+    if let Some(shuffled_db_output_path) = cli.dump_shuffled_db.as_deref() {
+        db_file::write_entries(
+            &db_entries_shuffled,
+            BufWriter::new(
+                File::create(shuffled_db_output_path)
+                    .expect("unable to open output file for dumping shuffled db"),
+            ),
+        )
+        .expect("unable to write shuffled db to file");
+    }
 
     let mut results = query_entries
         .par_iter()
@@ -578,6 +589,20 @@ impl Base {
     #[inline]
     fn to_byte(self, molecule: Molecule) -> u8 {
         self.try_to_byte(molecule).expect("cannot convert a timine-like residue to an ASCII representation when the molecule is unknown")
+    }
+
+    fn to_nibble(self) -> u8 {
+        match self {
+            Self::A => 0,
+            Self::C => 1,
+            Self::G => 2,
+            Self::T => 3,
+            Self::N => 4,
+        }
+    }
+
+    fn pair_to_nibble(pair: [Self; 2]) -> u8 {
+        (Self::to_nibble(pair[0]) << 4) | Self::to_nibble(pair[1])
     }
 
     #[inline]

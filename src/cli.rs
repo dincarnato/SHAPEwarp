@@ -24,10 +24,18 @@ pub struct Cli {
 
     /// Path of the shuffled database.
     ///
-    /// Use a file containing the shuffled db instead of the one generated on the fly.
+    /// Use a file containing the shuffled db instead of the one generated on the fly. You can dump
+    /// a shuffled db using `--dump-shuffled-db` in order to reuse it later with this parameter.
     #[clap(long)]
     #[serde(skip)]
     pub shuffled_db: Option<PathBuf>,
+
+    /// Dump the shuffled DB to the specified path.
+    ///
+    /// You can load the file for further analyses using the `--shuffled-db` parameter.
+    #[clap(long)]
+    #[serde(skip)]
+    pub dump_shuffled_db: Option<PathBuf>,
 
     /// Path to the query file
     ///

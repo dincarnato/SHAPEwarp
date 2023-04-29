@@ -13,6 +13,7 @@ use crate::{Base, Molecule, Reactivity, SequenceEntry};
 
 const END_SIZE: u8 = 17;
 const END_MARKER: &[u8] = b"[eofdb]";
+const VERSION: u16 = 1;
 
 #[derive(Debug)]
 pub struct Reader<R> {
@@ -108,6 +109,10 @@ impl ReactivityWithPlaceholder {
         // - `ReactivityWithPlaceholder` is transparent and it contains only a `Reactivity`
         // - lifetime is maintained
         unsafe { mem::transmute(this) }
+    }
+
+    pub fn inner(self) -> Reactivity {
+        self.0
     }
 }
 
@@ -372,6 +377,43 @@ pub fn read_file(path: &Path) -> Result<Vec<Entry>, Error> {
     let mut reader = Reader::new(BufReader::new(File::open(path)?))?;
     let entries = reader.entries().collect::<Result<_, _>>()?;
     Ok(entries)
+}
+
+pub fn write_entries<W: io::Write>(entries: &[Entry], mut writer: W) -> io::Result<()> {
+    entries.iter().try_for_each(|entry| {
+        let name = entry.name();
+        let sequence = entry.sequence();
+        let name_len_buf = u32::try_from(name.len().checked_add(1).unwrap())
+            .unwrap()
+            .to_le_bytes();
+        let seq_len_buf = u32::try_from(sequence.len()).unwrap().to_le_bytes();
+
+        writer.write_all(name_len_buf.as_slice())?;
+        writer.write_all(name.as_bytes())?;
+        writer.write_all(&[0])?;
+        writer.write_all(seq_len_buf.as_slice())?;
+        sequence.chunks_exact(2).try_for_each(|pair| {
+            writer.write_all(&[Base::pair_to_nibble(pair.try_into().unwrap())])
+        })?;
+        if let Some(base) = sequence.chunks_exact(2).remainder().first().copied() {
+            writer.write_all(&[Base::pair_to_nibble([base, Base::A])])?;
+        }
+
+        entry.reactivity().iter().try_for_each(|reactivity| {
+            let reactivity = f64::from(reactivity.inner()).to_le_bytes();
+            writer.write_all(reactivity.as_slice())
+        })?;
+
+        Ok::<_, io::Error>(())
+    })?;
+
+    let n_entries = u64::try_from(entries.len()).unwrap().to_le_bytes();
+    writer.write_all(n_entries.as_slice())?;
+    writer.write_all(VERSION.to_le_bytes().as_slice())?;
+    writer.write_all(END_MARKER)?;
+    writer.flush()?;
+
+    Ok(())
 }
 
 #[cfg(test)]
