@@ -822,15 +822,16 @@ pub(crate) struct AlignTolerance {
 }
 
 pub(crate) fn calc_seed_align_tolerance(
-    query_range: RangeInclusive<usize>,
-    target_range: RangeInclusive<usize>,
-    query_len: usize,
-    target_len: usize,
+    query_seed_range: RangeInclusive<usize>,
+    target_seed_range: RangeInclusive<usize>,
+    query_range: Range<usize>,
+    target_range: Range<usize>,
     align_len_tolerance: f32,
 ) -> AlignTolerance {
-    let upstream_len = *query_range.start().min(target_range.start());
-    let downstream_len =
-        (query_len - query_range.end() - 1).min(target_len - target_range.end() - 1);
+    let upstream_len = (query_seed_range.start() - query_range.start)
+        .min(target_seed_range.start() - target_range.start);
+    let downstream_len = (query_range.end - query_seed_range.end() - 1)
+        .min(target_range.end - target_seed_range.end() - 1);
     let upstream = upstream_len + (upstream_len as f32 * align_len_tolerance).round() as usize;
     let downstream =
         downstream_len + (downstream_len as f32 * align_len_tolerance).round() as usize;
@@ -1338,14 +1339,23 @@ mod tests {
 
     #[test]
     fn seed_align_tolerance() {
-        let tolerance = calc_seed_align_tolerance(36..=39, 21..=24, 51, 101, 0.1);
+        let tolerance = calc_seed_align_tolerance(36..=39, 21..=24, 20..51, 15..101, 0.5);
         assert_eq!(
             tolerance,
             AlignTolerance {
-                upstream: 23,
-                downstream: 12,
+                upstream: 9,
+                downstream: 17,
             }
-        )
+        );
+
+        let tolerance = calc_seed_align_tolerance(36..=39, 21..=24, 0..40, 15..101, 0.5);
+        assert_eq!(
+            tolerance,
+            AlignTolerance {
+                upstream: 9,
+                downstream: 0,
+            }
+        );
     }
 
     macro_rules! cell {

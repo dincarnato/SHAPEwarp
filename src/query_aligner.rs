@@ -280,15 +280,14 @@ where
     let trimmed_query_range = trimmed_range(query_entry.reactivity());
     let trimmed_db_range = trimmed_range(db_entry.reactivity());
     let query_len = trimmed_query_range.len();
-    let db_len = trimmed_db_range.len();
-    let query = intersect_range(query, trimmed_query_range);
-    let db = intersect_range(db, trimmed_db_range);
+    let query = intersect_range(query, trimmed_query_range.clone());
+    let db = intersect_range(db, trimmed_db_range.clone());
 
     let align_tolerance = calc_seed_align_tolerance(
         query.clone(),
         db.clone(),
-        query_len,
-        db_len,
+        trimmed_query_range,
+        trimmed_db_range,
         cli.alignment_args.align_len_tolerance,
     );
     let align_tolerance = &align_tolerance;
