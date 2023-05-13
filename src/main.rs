@@ -29,7 +29,7 @@ use std::{
 };
 
 use aligner::{AlignedSequence, Aligner, AlignmentResult, NoOpBehavior};
-use anyhow::Context;
+use anyhow::{bail, Context};
 use clap::Parser;
 use cli::MinMax;
 use db_file::{ReactivityLike, ReactivityWithPlaceholder};
@@ -84,11 +84,18 @@ fn main() -> anyhow::Result<()> {
         .build_global()
         .context("Unable to create thread pool")?;
 
-    if overwrite && matches!(output.try_exists(), Ok(true)) {
-        if let Err(err) = fs::remove_dir_all(output) {
-            eprintln!(
-                "Warning: cannot remove {} directory: {err}",
-                output.display()
+    if matches!(output.try_exists(), Ok(true)) {
+        if overwrite {
+            if let Err(err) = fs::remove_dir_all(output) {
+                eprintln!(
+                    "Warning: cannot remove {} directory: {err}",
+                    output.display()
+                );
+            }
+        } else {
+            bail!(
+                "Cannot run, output directory \"{}\" already exists. If you want to overwrite results, use the `--overwrite` argument.",
+                output.display(),
             );
         }
     }
