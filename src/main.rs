@@ -1,6 +1,7 @@
 mod aligner;
 mod cli;
 mod db_file;
+mod dotbracket;
 mod fasta;
 mod gapped_data;
 mod gapped_reactivity;
