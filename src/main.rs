@@ -3,6 +3,7 @@ mod cli;
 mod db_file;
 mod fasta;
 mod gapped_reactivity;
+mod gapped_sequence;
 mod iter;
 mod mass;
 mod null_model;
@@ -650,6 +651,7 @@ impl fmt::Display for BaseDisplay {
     }
 }
 
+#[derive(Debug, Clone, Copy, Eq, Hash, PartialEq)]
 struct Sequence<'a> {
     pub bases: &'a [Base],
     pub molecule: Molecule,
