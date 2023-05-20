@@ -7,6 +7,7 @@ mod gapped_reactivity;
 mod gapped_sequence;
 mod iter;
 mod mass;
+mod norm_dist;
 mod null_model;
 mod query_aligner;
 mod query_file;
