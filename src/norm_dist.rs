@@ -1,5 +1,3 @@
-#![allow(unused)]
-
 use std::ops::Deref;
 
 use num_traits::AsPrimitive;

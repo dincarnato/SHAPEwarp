@@ -1,6 +1,5 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 #![warn(clippy::pedantic)]
-#![allow(unused)]
 
 use core::slice;
 use std::{

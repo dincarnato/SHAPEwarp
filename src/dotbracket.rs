@@ -175,7 +175,6 @@ where
     }
 
     #[inline]
-    #[cfg(test)]
     pub fn into_sorted(self) -> DotBracket<C, true> {
         let Self {
             mut paired_blocks,
@@ -185,6 +184,25 @@ where
             .as_mut()
             .sort_unstable_by_key(|block| block.left.start);
 
+        DotBracket { paired_blocks, len }
+    }
+}
+
+impl<C, const SORTED: bool> DotBracket<C, SORTED>
+where
+    C: AsRef<[PairedBlock]>,
+{
+    #[inline]
+    pub fn paired_blocks(&self) -> &[PairedBlock] {
+        self.paired_blocks.as_ref()
+    }
+
+    pub fn to_owned(&self) -> DotBracket<Vec<PairedBlock>, SORTED> {
+        let &Self {
+            ref paired_blocks,
+            len,
+        } = self;
+        let paired_blocks = paired_blocks.as_ref().to_owned();
         DotBracket { paired_blocks, len }
     }
 }
@@ -211,8 +229,6 @@ where
 }
 
 pub type DotBracketOwned = DotBracket<Vec<PairedBlock>, false>;
-
-#[cfg(test)]
 pub type DotBracketBuffered<'a> = DotBracket<&'a mut Vec<PairedBlock>, false>;
 
 impl FromStr for DotBracketOwned {

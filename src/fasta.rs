@@ -139,6 +139,9 @@ mod test {
             evalue: 0.,
             status: QueryResultStatus::PassInclusionEvalue,
             alignment: Default::default(),
+            target_bp_support: Default::default(),
+            query_bp_support: Default::default(),
+            mfe_pvalue: Default::default(),
         };
 
         let mut writer = vec![];
@@ -169,6 +172,9 @@ mod test {
             evalue: 0.,
             status: QueryResultStatus::PassInclusionEvalue,
             alignment: Default::default(),
+            target_bp_support: Default::default(),
+            query_bp_support: Default::default(),
+            mfe_pvalue: Default::default(),
         };
 
         let mut writer = vec![];
@@ -198,6 +204,9 @@ mod test {
             evalue: 0.,
             status: QueryResultStatus::PassInclusionEvalue,
             alignment: Default::default(),
+            target_bp_support: Default::default(),
+            query_bp_support: Default::default(),
+            mfe_pvalue: Default::default(),
         };
 
         assert_eq!(

@@ -1,5 +1,3 @@
-#![allow(unused)]
-
 use std::{iter, ops::Range, slice};
 
 use rand::{distributions::Uniform, prelude::Distribution, seq::SliceRandom, Rng};

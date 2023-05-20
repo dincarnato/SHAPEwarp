@@ -16,12 +16,12 @@ mod viennarna;
 
 use std::{
     cmp::Reverse,
-    fmt::{self, Write},
+    fmt::{self, Display, Write},
     fs::{self, File},
     io::{self, BufWriter},
     iter::Sum,
     num::ParseFloatError,
-    ops::{self, Not, RangeInclusive},
+    ops::{self, Not, Range, RangeInclusive},
     path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
@@ -31,13 +31,15 @@ use aligner::{AlignedSequence, Aligner, AlignmentResult, NoOpBehavior};
 use anyhow::Context;
 use clap::Parser;
 use cli::MinMax;
-use db_file::ReactivityWithPlaceholder;
+use db_file::{ReactivityLike, ReactivityWithPlaceholder};
+use dotbracket::DotBracketBuffered;
 use fftw::{
     array::AlignedVec,
     plan::{C2CPlan, C2CPlan32, C2CPlan64},
     types::{Flag, Sign},
 };
 use fnv::FnvHashMap;
+use gapped_data::GappedData;
 use iter::IterWithRestExt;
 use itertools::Itertools;
 use mass::{ComplexExt, Mass};
@@ -45,16 +47,22 @@ use null_model::*;
 use num_complex::Complex;
 use num_traits::{cast, float::FloatCore, Float, FromPrimitive, NumAssignRef, NumRef, RefNum};
 use query_aligner::{align_query_to_target_db, QueryAlignResult};
+use rand::thread_rng;
 use rayon::prelude::*;
 use serde::{Deserialize, Deserializer, Serialize};
 use smallvec::SmallVec;
+use statrs::distribution::{self, ContinuousCDF};
 use tabled::{Table, Tabled};
+use viennarna::Structure;
 
 use crate::{
     aligner::BacktrackBehavior,
     cli::{Cli, ReportAlignment},
-    gapped_reactivity::*,
+    dotbracket::DotBracket,
+    norm_dist::NormDist,
+    viennarna::{FoldCompound, FoldCompoundOptions, ModelDetails},
 };
+pub(crate) use crate::{gapped_reactivity::*, gapped_sequence::*};
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -137,11 +145,13 @@ fn main() -> anyhow::Result<()> {
 
     let mut results = query_entries
         .par_iter()
+        .zip(&query_entries_orig)
         .try_fold(
             || MutableHandlerData::new(&cli),
-            |mutable, query_entry| {
+            |mutable, (query_entry, query_entries_orig)| {
                 handle_query_entry(
                     query_entry,
+                    query_entries_orig,
                     HandlerData {
                         shared: SharedHandlerData {
                             cli: &cli,
@@ -205,13 +215,12 @@ fn main() -> anyhow::Result<()> {
         fs::create_dir_all(&alignments_path)
             .context("Unable to create alignments output directory")?;
 
+        let mut results = results
+            .iter()
+            .filter(|result| matches!(result.status, QueryResultStatus::PassInclusionEvalue));
         match report_alignment {
             ReportAlignment::Fasta => {
                 results
-                    .iter()
-                    .filter(|result| {
-                        matches!(result.status, QueryResultStatus::PassInclusionEvalue)
-                    })
                     .try_for_each(|result| {
                         fasta::write_result(
                             result,
@@ -236,9 +245,14 @@ fn main() -> anyhow::Result<()> {
     if results.is_empty() {
         println!("No match found with current search settings.")
     } else {
-        use tabled::settings::Style;
+        use tabled::settings::{object, Disable, Style};
 
-        println!("{}", Table::new(results).with(Style::empty()));
+        let mut table = Table::new(results);
+        table.with(Style::empty());
+        if cli.alignment_folding_eval_args.eval_align_fold.not() {
+            table.with(Disable::column(object::Columns::new(11..14)));
+        }
+        println!("{}", table);
     }
 
     Ok(())
@@ -283,6 +297,7 @@ struct HandlerData<'a> {
 
 fn handle_query_entry<'a>(
     query_entry: &'a query_file::Entry,
+    query_entry_orig: &'a query_file::Entry,
     handler_data: HandlerData<'a>,
 ) -> Result<MutableHandlerData<'a>, anyhow::Error> {
     let HandlerData {
@@ -347,52 +362,146 @@ fn handle_query_entry<'a>(
     remove_overlapping_results(&mut query_results, &mut index_to_remove, cli);
 
     let query = Arc::clone(&query_entry.name);
-    let results_iter = query_results.iter().map(|&(ref result, pvalue, evalue)| {
-        let &QueryAlignResult {
-            db_entry,
-            ref db_match,
-            score,
-            db: ref db_range,
-            query: ref query_range,
-            ref alignment,
-            ..
-        } = result;
+    let mut rng = thread_rng();
+    let mut dotbracket_results_buffer = Vec::new();
+    let mut dotbracket_temp_buffer = Vec::new();
+    let mut null_model_energies = Vec::new();
+    let results_iter = query_results
+        .iter()
+        .map(|&(ref result, pvalue, evalue)| {
+            let status = if evalue > cli.report_evalue {
+                QueryResultStatus::NotPass
+            } else if evalue > cli.inclusion_evalue {
+                QueryResultStatus::PassReportEvalue
+            } else {
+                QueryResultStatus::PassInclusionEvalue
+            };
+            (result, pvalue, evalue, status)
+        })
+        .map(|(result, pvalue, evalue, mut status)| {
+            if cli.alignment_folding_eval_args.eval_align_fold.not()
+                || matches!(status, QueryResultStatus::PassInclusionEvalue).not()
+            {
+                return (result, pvalue, evalue, status, None, None);
+            }
 
-        let status = if evalue > cli.report_evalue {
-            QueryResultStatus::NotPass
-        } else if evalue > cli.inclusion_evalue {
-            QueryResultStatus::PassReportEvalue
-        } else {
-            QueryResultStatus::PassInclusionEvalue
-        };
+            let AlifoldOnResult {
+                dotbracket,
+                ignore,
+                mfe,
+                gapped_data,
+                target_bp_support,
+                query_bp_support,
+            } = alifold_on_result(
+                result,
+                query_entry,
+                query_entry_orig,
+                cli,
+                &mut dotbracket_results_buffer,
+                &mut dotbracket_temp_buffer,
+            );
 
-        let db_entry = db_entry.name().to_owned();
-        let query = Arc::clone(&query);
-        let alignment = Arc::clone(alignment);
+            if ignore {
+                return (
+                    result,
+                    pvalue,
+                    evalue,
+                    QueryResultStatus::PassReportEvalue,
+                    None,
+                    Some((target_bp_support, query_bp_support)),
+                );
+            }
 
-        let query_seed = QueryResultRange(db_match.query.clone());
-        let db_seed = QueryResultRange(db_match.db.clone());
-        let query_start = *query_range.start();
-        let query_end = *query_range.end();
-        let db_start = *db_range.start();
-        let db_end = *db_range.end();
+            let mut indices_buffer = Vec::new();
+            null_model_energies.clear();
+            null_model_energies.extend((0..cli.alignment_folding_eval_args.shufflings).map(|_| {
+                let gapped_data = gapped_data.clone().shuffled(
+                    cli.alignment_folding_eval_args.block_size,
+                    &mut indices_buffer,
+                    &mut rng,
+                );
 
-        QueryResult {
-            query,
-            db_entry,
-            query_start,
-            query_end,
-            db_start,
-            db_end,
-            query_seed,
-            db_seed,
-            score,
-            pvalue,
-            evalue,
-            status,
-            alignment,
-        }
-    });
+                let sequences = [gapped_data.target(), gapped_data.query()];
+                let (_, mfe) = alifold_mfe(&sequences, &sequences, cli);
+
+                mfe
+            }));
+            let dist = NormDist::from_sample(&*null_model_energies);
+            let z_score = dist.z_score(mfe);
+
+            let (valid_dist, mfe_pvalue) = (z_score < 0.)
+                .then(|| {
+                    let pvalue = distribution::Normal::new(dist.mean(), dist.stddev())
+                        .expect("stddev is expected to be greater than 0")
+                        .cdf(mfe.into());
+
+                    let significant =
+                        pvalue < cli.alignment_folding_eval_args.align_fold_pvalue.into();
+                    (significant, pvalue)
+                })
+                .unzip();
+            let valid_dist = valid_dist.unwrap_or(false);
+
+            if valid_dist.not() {
+                status = QueryResultStatus::PassReportEvalue;
+            }
+
+            (
+                result,
+                pvalue,
+                evalue,
+                status,
+                mfe_pvalue
+                    .map(|mfe_pvalue| (mfe_pvalue, dotbracket.unwrap().into_sorted().to_owned())),
+                Some((target_bp_support, query_bp_support)),
+            )
+        })
+        .map(
+            |(result, pvalue, evalue, status, mfe_pvalue_dotbracket, bp_support)| {
+                let &QueryAlignResult {
+                    db_entry,
+                    ref db_match,
+                    score,
+                    db: ref db_range,
+                    query: ref query_range,
+                    ref alignment,
+                    ..
+                } = result;
+
+                let db_entry = db_entry.name().to_owned();
+                let query = Arc::clone(&query);
+                let alignment = Arc::clone(alignment);
+
+                let query_seed = QueryResultRange(db_match.query.clone());
+                let db_seed = QueryResultRange(db_match.db.clone());
+                let query_start = *query_range.start();
+                let query_end = *query_range.end();
+                let db_start = *db_range.start();
+                let db_end = *db_range.end();
+
+                let (target_bp_support, query_bp_support) = bp_support.unzip();
+                let mfe_pvalue = mfe_pvalue_dotbracket.map(|(mfe_pvalue, _)| mfe_pvalue);
+
+                QueryResult {
+                    query,
+                    db_entry,
+                    query_start,
+                    query_end,
+                    db_start,
+                    db_end,
+                    query_seed,
+                    db_seed,
+                    score,
+                    pvalue,
+                    evalue,
+                    status,
+                    mfe_pvalue,
+                    target_bp_support,
+                    query_bp_support,
+                    alignment,
+                }
+            },
+        );
     results.extend(results_iter);
 
     reusable_query_results = reuse_vec(query_results);
@@ -453,6 +562,18 @@ struct QueryResult {
     #[tabled(display_with = "display_scientific")]
     evalue: f64,
 
+    #[serde(rename = "TargetBpSupport")]
+    #[tabled(display_with = "display_scientific_opt")]
+    target_bp_support: Option<f32>,
+
+    #[serde(rename = "TargetBpSupport")]
+    #[tabled(display_with = "display_scientific_opt")]
+    query_bp_support: Option<f32>,
+
+    #[serde(rename = "MfePvalue")]
+    #[tabled(display_with = "display_scientific_opt")]
+    mfe_pvalue: Option<f64>,
+
     #[serde(rename = "")]
     status: QueryResultStatus,
 
@@ -477,6 +598,9 @@ impl QueryResult {
             pvalue: Default::default(),
             evalue: Default::default(),
             status: Default::default(),
+            target_bp_support: Default::default(),
+            query_bp_support: Default::default(),
+            mfe_pvalue: Default::default(),
             alignment: Default::default(),
         }
     }
@@ -1198,12 +1322,22 @@ fn create_csv_from_writer<W: io::Write>(writer: W) -> csv::Writer<W> {
         .from_writer(writer)
 }
 
-fn display_scientific(x: &f64) -> String {
-    if *x >= 0.1 {
+fn display_scientific<T>(x: &T) -> String
+where
+    T: Float + FromPrimitive + Display + fmt::LowerExp,
+{
+    if *x >= T::from_f32(0.1).unwrap() {
         format!("{x:.3}")
     } else {
         format!("{x:.3e}")
     }
+}
+
+fn display_scientific_opt<T>(x: &Option<T>) -> String
+where
+    T: Float + FromPrimitive + Display + fmt::LowerExp,
+{
+    x.as_ref().map(display_scientific).unwrap_or_default()
 }
 
 struct ResultFileFormat<'a> {
@@ -1373,6 +1507,214 @@ fn are_overlapping(
         (overlap.end() + 1).saturating_sub(*overlap.start()) as f64
             > (a_len.min(b_len)) * max_align_overlap
     }
+}
+
+#[derive(Debug, Default)]
+struct BasePairsCount {
+    pub total: usize,
+    pub canonical: usize,
+}
+
+fn count_base_pairs(
+    sequence: &GappedSequence,
+    slice: Range<usize>,
+    paired_last: usize,
+) -> BasePairsCount {
+    let slice_len = slice.end - slice.start;
+    let canonical = sequence
+        .get(slice)
+        .unwrap()
+        .iter()
+        .zip(
+            sequence
+                .get((paired_last - slice_len)..(paired_last + 1))
+                .unwrap()
+                .iter()
+                .rev(),
+        )
+        .filter_map(|(a, b)| a.to_base().and_then(|a| b.to_base().map(|b| (a, b))))
+        .filter(|(a, b)| {
+            matches!(
+                (a, b),
+                (Base::A | Base::G, Base::T)
+                    | (Base::T, Base::A | Base::G)
+                    | (Base::C, Base::G)
+                    | (Base::G, Base::C)
+            )
+        })
+        .count();
+
+    BasePairsCount {
+        total: slice_len,
+        canonical,
+    }
+}
+
+#[derive(Debug)]
+struct AlifoldOnResult<'a, 'b> {
+    pub dotbracket: Option<DotBracketBuffered<'b>>,
+    pub ignore: bool,
+    pub mfe: f32,
+    pub gapped_data: GappedData<'a, <query_file::Entry as SequenceEntry>::Reactivity>,
+    pub target_bp_support: f32,
+    pub query_bp_support: f32,
+}
+
+#[inline]
+fn alifold_on_result<'a, 'b>(
+    result: &'a QueryAlignResult<AlignedSequence>,
+    query_entry: &'a query_file::Entry,
+    query_entry_orig: &'a query_file::Entry,
+    cli: &Cli,
+    dotbracket_results_buffer: &'b mut Vec<dotbracket::PairedBlock>,
+    dotbracket_temp_buffer: &mut Vec<dotbracket::PartialPairedBlock>,
+) -> AlifoldOnResult<'a, 'b> {
+    let sequences = get_gapped_sequences(result, query_entry);
+    let reactivities = get_gapped_reactivities(result, query_entry_orig);
+
+    let (structure, mfe) = alifold_mfe(&sequences, &reactivities, cli);
+    let dot_bracket_bp_count_result = DotBracket::from_bytes_with_buffer(
+        structure.usable(),
+        dotbracket_results_buffer,
+        dotbracket_temp_buffer,
+    )
+    .map(|dotbracket| {
+        let (target, query) = dotbracket
+            .paired_blocks()
+            .iter()
+            .map(|paired_block| {
+                let left = paired_block.left();
+                let paired_last = paired_block.right().end - 1;
+                let bp_count_target = count_base_pairs(&sequences[0], left.clone(), paired_last);
+                let bp_count_query = count_base_pairs(&sequences[1], left.clone(), paired_last);
+
+                (bp_count_target, bp_count_query)
+            })
+            .fold(
+                (BasePairsCount::default(), BasePairsCount::default()),
+                |(mut target, mut query), (other_target, other_query)| {
+                    target.total += other_target.total;
+                    target.canonical += other_target.canonical;
+
+                    query.total += other_query.total;
+                    query.canonical += other_query.canonical;
+
+                    (target, query)
+                },
+            );
+        (dotbracket, target, query)
+    });
+
+    let (dotbracket, ignore, target_bp_support, query_bp_support) =
+        match dot_bracket_bp_count_result {
+            Ok((dotbracket, bp_count_target, bp_count_query)) => {
+                let target_canonical_fraction =
+                    bp_count_target.canonical as f64 / bp_count_target.total as f64;
+                let query_canonical_fraction =
+                    bp_count_query.canonical as f64 / bp_count_query.total as f64;
+
+                let min_bp_support = cli.alignment_folding_eval_args.min_bp_support.into();
+                let ignore = target_canonical_fraction < min_bp_support
+                    || query_canonical_fraction < min_bp_support;
+
+                (
+                    Some(dotbracket),
+                    ignore,
+                    target_canonical_fraction as f32,
+                    query_canonical_fraction as f32,
+                )
+            }
+            Err(err) => {
+                eprintln!("WARNING: cannot evaluate dot bracket for structure {structure}: {err}");
+                (None, false, 0., 0.)
+            }
+        };
+
+    let [target_sequence, query_sequence] = sequences;
+    let [target_reactivity, query_reactivity] = reactivities;
+
+    let gapped_data = GappedData::new_unchecked(
+        query_sequence,
+        query_reactivity,
+        target_sequence,
+        target_reactivity,
+    );
+
+    AlifoldOnResult {
+        dotbracket,
+        ignore,
+        mfe,
+        gapped_data,
+        target_bp_support,
+        query_bp_support,
+    }
+}
+
+fn alifold_mfe<'a, S, R, RR>(sequences: &[S], reactivities: &[R], cli: &Cli) -> (Structure, f32)
+where
+    S: GappedSequenceLike + 'a,
+    R: GappedReactivityLike<RR> + 'a,
+    RR: ReactivityLike,
+{
+    let mut model_details = ModelDetails::default();
+
+    *model_details.max_bp_span_mut() = cli.folding_args.max_bp_span.try_into().unwrap();
+    let mut fold_compound = FoldCompound::new_comparative(
+        sequences,
+        Some(&model_details),
+        FoldCompoundOptions::DEFAULT,
+    )
+    .unwrap();
+
+    fold_compound
+        .add_shape_reactivity_for_deigan_consensus_structure_prediction(
+            reactivities,
+            cli.folding_args.slope.into(),
+            cli.folding_args.intercept.into(),
+            FoldCompoundOptions::DEFAULT,
+        )
+        .unwrap();
+
+    fold_compound.minimum_free_energy()
+}
+
+fn get_gapped_sequences<'a>(
+    query_align_result: &'a QueryAlignResult<AlignedSequence>,
+    query_entry: &'a query_file::Entry,
+) -> [GappedSequence<'a>; 2] {
+    let query = Sequence {
+        bases: &query_entry.sequence()[query_align_result.query.clone()],
+        molecule: query_entry.molecule(),
+    };
+    let target = Sequence {
+        bases: &query_align_result.db_entry_orig.sequence()[query_align_result.db.clone()],
+        molecule: query_align_result.db_entry_orig.molecule(),
+    };
+
+    [
+        GappedSequence::new(target, &query_align_result.alignment.target),
+        GappedSequence::new(query, &query_align_result.alignment.query),
+    ]
+}
+
+fn get_gapped_reactivities<'a>(
+    query_align_result: &'a QueryAlignResult<AlignedSequence>,
+    query_entry_orig: &'a query_file::Entry,
+) -> [GappedReactivity<'a, <query_file::Entry as SequenceEntry>::Reactivity>; 2] {
+    let query_reactivity = &query_entry_orig.reactivity()[query_align_result.query.clone()];
+    let target_reactivity =
+        &query_align_result.db_entry_orig.reactivity()[query_align_result.db.clone()];
+
+    [
+        GappedReactivity {
+            reactivity: target_reactivity,
+            alignment: query_align_result.alignment.target.to_ref(),
+        },
+        GappedReactivity {
+            reactivity: query_reactivity,
+            alignment: query_align_result.alignment.query.to_ref(),
+        },
+    ]
 }
 
 #[cfg(test)]

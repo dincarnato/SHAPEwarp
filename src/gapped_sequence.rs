@@ -1,12 +1,12 @@
 use std::{
     ffi::CString,
     fmt::{self, Display},
-    ops::Not,
+    ops::{Not, Range},
     slice,
 };
 
 use crate::{
-    aligner::{AlignedSequenceRef, BaseOrGap},
+    aligner::{AlignedSequence, AlignedSequenceRef, BaseOrGap},
     Base, Molecule, Sequence,
 };
 
@@ -21,11 +21,7 @@ pub(crate) trait GappedSequenceLike {
 }
 
 impl<'a> GappedSequence<'a> {
-    #[cfg(test)]
-    pub(crate) fn new(
-        sequence: Sequence<'a>,
-        alignment: &'a crate::aligner::AlignedSequence,
-    ) -> Self {
+    pub(crate) fn new(sequence: Sequence<'a>, alignment: &'a AlignedSequence) -> Self {
         let alignment = alignment.to_ref();
         Self {
             sequence,
@@ -36,6 +32,32 @@ impl<'a> GappedSequence<'a> {
     #[inline]
     pub(crate) fn iter(&self) -> GappedSequenceIter<'_> {
         IntoIterator::into_iter(self)
+    }
+
+    pub(crate) fn get(&self, index: Range<usize>) -> Option<GappedSequence<'a>> {
+        let start = index.start;
+        self.alignment.0.get(index).map(|alignment| {
+            let bases_before = self.alignment.0[..start]
+                .iter()
+                .filter(|base_or_gap| base_or_gap.is_base())
+                .count();
+            let bases = alignment
+                .iter()
+                .filter(|base_or_gap| base_or_gap.is_base())
+                .count();
+
+            let bases = &self.sequence.bases[bases_before..(bases_before + bases)];
+            let sequence = Sequence {
+                bases,
+                molecule: self.sequence.molecule,
+            };
+            let alignment = AlignedSequenceRef(alignment);
+
+            GappedSequence {
+                sequence,
+                alignment,
+            }
+        })
     }
 }
 
@@ -130,7 +152,6 @@ pub(crate) enum StatefulBaseOrGap {
 
 impl StatefulBaseOrGap {
     #[inline]
-    #[cfg(test)]
     pub(crate) fn to_base(self) -> Option<Base> {
         match self {
             Self::Base(base) => Some(base),
