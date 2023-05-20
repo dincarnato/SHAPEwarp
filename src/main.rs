@@ -139,6 +139,7 @@ fn main() -> anyhow::Result<()> {
                         shared: SharedHandlerData {
                             cli: &cli,
                             db_entries: &db_entries,
+                            db_entries_orig: &db_entries_orig,
                             db_entries_shuffled: &db_entries_shuffled,
                         },
                         mutable,
@@ -238,6 +239,7 @@ fn main() -> anyhow::Result<()> {
 struct SharedHandlerData<'a> {
     cli: &'a Cli,
     db_entries: &'a [db_file::Entry],
+    db_entries_orig: &'a [db_file::Entry],
     db_entries_shuffled: &'a [db_file::Entry],
 }
 
@@ -279,6 +281,7 @@ fn handle_query_entry<'a>(
             SharedHandlerData {
                 cli,
                 db_entries,
+                db_entries_orig,
                 db_entries_shuffled,
             },
         mutable:
@@ -295,6 +298,7 @@ fn handle_query_entry<'a>(
 
     let null_aligner = align_query_to_target_db::<NoOpBehavior>(
         query_entry,
+        db_entries_shuffled,
         db_entries_shuffled,
         &mut null_all_scores,
         cli,
@@ -313,6 +317,7 @@ fn handle_query_entry<'a>(
         align_query_to_target_db::<BacktrackBehavior>(
             query_entry,
             db_entries,
+            db_entries_orig,
             &mut query_all_results,
             cli,
         )?
@@ -341,6 +346,7 @@ fn handle_query_entry<'a>(
             db: ref db_range,
             query: ref query_range,
             ref alignment,
+            ..
         } = result;
 
         let status = if evalue > cli.report_evalue {
@@ -1021,6 +1027,7 @@ pub struct MatchRanges {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DbEntryMatches<'a> {
     db_entry: &'a db_file::Entry,
+    db_entry_orig: &'a db_file::Entry,
     matches: Vec<MatchRanges>,
 }
 
@@ -2845,6 +2852,7 @@ mod tests {
             (
                 QueryAlignResult {
                     db_entry: &EMPTY_ENTRY,
+                    db_entry_orig: &EMPTY_ENTRY,
                     db_match: MatchRanges {
                         db: 0..=0,
                         query: 0..=0,
@@ -2951,6 +2959,7 @@ mod tests {
                 (0..3).map(move |inner_index| {
                     let result = QueryAlignResult {
                         db_entry,
+                        db_entry_orig: db_entry,
                         db_match: MatchRanges {
                             db: 13..=16,
                             query: 13..=16,

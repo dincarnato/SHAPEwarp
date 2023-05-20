@@ -21,33 +21,39 @@ use crate::{
 pub(crate) fn align_query_to_target_db<'a, 'cli, Behavior>(
     query_entry: &'a query_file::Entry,
     db_entries: &'a [db_file::Entry],
+    db_entries_orig: &'a [db_file::Entry],
     query_results: &mut Vec<DbEntryMatches<'a>>,
     cli: &'cli Cli,
 ) -> anyhow::Result<QueryAligner<'a, 'cli, Behavior>> {
     query_results.clear();
-    for db_entry in db_entries {
-        let db_file::Entry {
-            sequence,
-            reactivity,
-            ..
-        } = db_entry;
+    db_entries
+        .iter()
+        .zip(db_entries_orig)
+        .try_for_each(|(db_entry, db_entry_orig)| {
+            let db_file::Entry {
+                sequence,
+                reactivity,
+                ..
+            } = db_entry;
 
-        let db_data = DbData::new(sequence, reactivity)?;
-        let matching_kmers = get_matching_kmers(
-            query_entry.reactivity(),
-            query_entry.sequence(),
-            &db_data,
-            cli,
-        )?;
-        let grouped = group_matching_kmers(&matching_kmers, cli);
+            let db_data = DbData::new(sequence, reactivity)?;
+            let matching_kmers = get_matching_kmers(
+                query_entry.reactivity(),
+                query_entry.sequence(),
+                &db_data,
+                cli,
+            )?;
+            let grouped = group_matching_kmers(&matching_kmers, cli);
 
-        if grouped.is_empty().not() {
-            query_results.push(DbEntryMatches {
-                db_entry,
-                matches: grouped,
-            });
-        }
-    }
+            if grouped.is_empty().not() {
+                query_results.push(DbEntryMatches {
+                    db_entry,
+                    db_entry_orig,
+                    matches: grouped,
+                });
+            }
+            Ok::<_, anyhow::Error>(())
+        })?;
 
     Ok(QueryAligner {
         query_entry,
@@ -136,6 +142,7 @@ impl<'a, 'cli, 'aln, Behavior> QueryAlignIterator<'a, 'cli, 'aln, Behavior> {
         query_results.next().map(|query_result| {
             let &DbEntryMatches {
                 db_entry,
+                db_entry_orig,
                 matches: ref db,
             } = query_result;
 
@@ -144,6 +151,7 @@ impl<'a, 'cli, 'aln, Behavior> QueryAlignIterator<'a, 'cli, 'aln, Behavior> {
                 db_iter: db.iter(),
                 query_entry,
                 db_entry,
+                db_entry_orig,
                 cli,
                 _marker: PhantomData,
             };
@@ -201,6 +209,7 @@ struct QueryAlignIteratorInner<'a, 'cli, 'aln, Behavior> {
     db_iter: slice::Iter<'a, MatchRanges>,
     query_entry: &'a query_file::Entry,
     db_entry: &'a db_file::Entry,
+    db_entry_orig: &'a db_file::Entry,
     cli: &'cli Cli,
     _marker: PhantomData<Behavior>,
 }
@@ -208,6 +217,7 @@ struct QueryAlignIteratorInner<'a, 'cli, 'aln, Behavior> {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct QueryAlignResult<'a, Alignment> {
     pub(crate) db_entry: &'a db_file::Entry,
+    pub(crate) db_entry_orig: &'a db_file::Entry,
     pub(crate) db_match: MatchRanges,
     pub(crate) score: Reactivity,
     pub(crate) db: ops::RangeInclusive<usize>,
@@ -228,6 +238,7 @@ where
             ref mut db_iter,
             query_entry,
             db_entry,
+            db_entry_orig,
             cli,
             _marker,
         } = self;
@@ -250,6 +261,7 @@ where
                 db_match.clone(),
                 query_entry,
                 db_entry,
+                db_entry_orig,
                 seed_score,
                 aligner,
                 cli,
@@ -263,6 +275,7 @@ fn handle_match<'db, 'cli, Behavior>(
     db_match: MatchRanges,
     query_entry: &query_file::Entry,
     db_entry: &'db db_file::Entry,
+    db_entry_orig: &'db db_file::Entry,
     seed_score: f32,
     aligner: &mut Aligner<'cli>,
     cli: &'cli Cli,
@@ -336,6 +349,7 @@ where
 
     QueryAlignResult {
         db_entry,
+        db_entry_orig,
         db_match,
         score,
         db,
