@@ -2,6 +2,7 @@ mod aligner;
 mod cli;
 mod db_file;
 mod fasta;
+mod gapped_reactivity;
 mod iter;
 mod mass;
 mod null_model;
@@ -21,11 +22,11 @@ use std::{
     sync::Arc,
 };
 
-use aligner::{AlignedSequence, Aligner, AlignmentResult, BaseOrGap, NoOpBehavior};
+use aligner::{AlignedSequence, Aligner, AlignmentResult, NoOpBehavior};
 use anyhow::Context;
 use clap::Parser;
 use cli::MinMax;
-use db_file::{ReactivityLike, ReactivityWithPlaceholder};
+use db_file::ReactivityWithPlaceholder;
 use fftw::{
     array::AlignedVec,
     plan::{C2CPlan, C2CPlan32, C2CPlan64},
@@ -40,13 +41,14 @@ use num_complex::Complex;
 use num_traits::{cast, float::FloatCore, Float, FromPrimitive, NumAssignRef, NumRef, RefNum};
 use query_aligner::{align_query_to_target_db, QueryAlignResult};
 use rayon::prelude::*;
-use serde::{ser::SerializeSeq, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use smallvec::SmallVec;
 use tabled::{Table, Tabled};
 
 use crate::{
     aligner::BacktrackBehavior,
     cli::{Cli, ReportAlignment},
+    gapped_reactivity::*,
 };
 
 fn main() -> anyhow::Result<()> {
@@ -1251,58 +1253,6 @@ impl fmt::Display for ResultFileFormat<'_> {
     }
 }
 
-struct GappedReactivity<'a, T> {
-    reactivity: &'a [T],
-    alignment: &'a AlignedSequence,
-}
-
-impl<'a, T> Serialize for GappedReactivity<'a, T>
-where
-    T: ReactivityLike + Serialize,
-{
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut usable_alignment = 0;
-        let gaps = self
-            .alignment
-            .0
-            .iter()
-            .scan(0, |bases, base| {
-                if *bases == self.reactivity.len() {
-                    None
-                } else {
-                    usable_alignment += 1;
-                    if let BaseOrGap::Base = base {
-                        *bases += 1;
-                    }
-                    Some(base)
-                }
-            })
-            .filter(|base| matches!(base, BaseOrGap::Gap))
-            .count();
-        let usable_alignment = usable_alignment;
-        let len = self.reactivity.len() + gaps;
-        let mut seq = serializer.serialize_seq(Some(len))?;
-
-        let mut reactivities = self.reactivity.iter();
-        for base_or_gap in &self.alignment.0[..usable_alignment] {
-            match base_or_gap {
-                BaseOrGap::Base => match reactivities.next() {
-                    Some(reactivity) if reactivity.is_nan() => seq.serialize_element("NaN")?,
-                    Some(reactivity) => seq.serialize_element(reactivity)?,
-                    None => break,
-                },
-                BaseOrGap::Gap => seq.serialize_element(&f32::NAN)?,
-            }
-        }
-
-        reactivities.try_for_each(|reactivity| seq.serialize_element(reactivity))?;
-        seq.end()
-    }
-}
-
 fn write_results_reactivity(
     results: &[QueryResult],
     db_entries: &[db_file::Entry],
@@ -1347,14 +1297,14 @@ fn write_results_reactivity(
             let data = Data {
                 query: GappedReactivity {
                     reactivity: query,
-                    alignment: &result.alignment.query,
+                    alignment: result.alignment.query.to_ref(),
                 },
                 query_id: query_entry.name(),
                 query_from: result.query_start,
                 query_to: result.query_end,
                 target: GappedReactivity {
                     reactivity: target,
-                    alignment: &result.alignment.target,
+                    alignment: result.alignment.target.to_ref(),
                 },
                 target_id: db_entry.name(),
                 target_from: result.db_start,
@@ -1423,7 +1373,7 @@ fn are_overlapping(
 mod tests {
     use approx::{assert_abs_diff_eq, assert_relative_eq};
 
-    use crate::aligner::BaseOrGap;
+    use crate::aligner::{AlignedSequenceRef, BaseOrGap};
 
     use super::*;
 
@@ -3021,7 +2971,7 @@ mod tests {
         use std::f64::NAN;
         use BaseOrGap::*;
 
-        fn check(reactivity: &[f32], alignment: &AlignedSequence, expected: &[f64]) {
+        fn check(reactivity: &[f32], alignment: AlignedSequenceRef<'_>, expected: &[f64]) {
             let values = serde_json::to_value(GappedReactivity {
                 reactivity,
                 alignment,
@@ -3038,7 +2988,7 @@ mod tests {
 
         check(
             &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
-            &AlignedSequence(vec![
+            AlignedSequenceRef(&[
                 Gap, Gap, Base, Base, Gap, Base, Gap, Gap, Base, Base, Base, Gap,
             ]),
             &[
@@ -3048,27 +2998,25 @@ mod tests {
 
         check(
             &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
-            &AlignedSequence(vec![Base, Base, Gap, Base]),
+            AlignedSequenceRef(&[Base, Base, Gap, Base]),
             &[0.1, 0.2, NAN, 0.3, 0.4, 0.5, 0.6, 0.7],
         );
 
         check(
             &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
-            &AlignedSequence(vec![Base; 40]),
+            AlignedSequenceRef(&[Base; 40]),
             &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
         );
 
         check(
             &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
-            &AlignedSequence(vec![
-                Base, Base, Base, Base, Base, Base, Base, Gap, Gap, Gap,
-            ]),
+            AlignedSequenceRef(&[Base, Base, Base, Base, Base, Base, Base, Gap, Gap, Gap]),
             &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
         );
 
         check(
             &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
-            &AlignedSequence(vec![
+            AlignedSequenceRef(&[
                 Gap, Gap, Gap, Base, Base, Base, Base, Base, Base, Base, Gap, Gap, Gap,
             ]),
             &[NAN, NAN, NAN, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],

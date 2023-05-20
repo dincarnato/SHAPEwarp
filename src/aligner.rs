@@ -186,6 +186,22 @@ pub(crate) enum BaseOrGap {
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub(crate) struct AlignedSequence(pub(crate) Vec<BaseOrGap>);
 
+impl AlignedSequence {
+    pub(crate) fn to_ref(&self) -> AlignedSequenceRef<'_> {
+        self.into()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub(crate) struct AlignedSequenceRef<'a>(pub(crate) &'a [BaseOrGap]);
+
+impl<'a> From<&'a AlignedSequence> for AlignedSequenceRef<'a> {
+    #[inline]
+    fn from(value: &'a AlignedSequence) -> Self {
+        Self(&value.0)
+    }
+}
+
 impl<'a> Aligner<'a> {
     pub(crate) fn new(cli: &'a Cli) -> Self {
         Self {
