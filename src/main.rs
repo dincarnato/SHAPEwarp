@@ -2,6 +2,7 @@ mod aligner;
 mod cli;
 mod db_file;
 mod fasta;
+mod gapped_data;
 mod gapped_reactivity;
 mod gapped_sequence;
 mod iter;
