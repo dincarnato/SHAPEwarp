@@ -9,6 +9,7 @@ mod mass;
 mod null_model;
 mod query_aligner;
 mod query_file;
+mod viennarna;
 
 use std::{
     cmp::Reverse,

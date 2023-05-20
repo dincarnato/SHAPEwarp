@@ -183,6 +183,13 @@ pub(crate) enum BaseOrGap {
     Gap,
 }
 
+impl BaseOrGap {
+    #[inline]
+    pub fn is_base(self) -> bool {
+        matches!(self, BaseOrGap::Base)
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub(crate) struct AlignedSequence(pub(crate) Vec<BaseOrGap>);
 

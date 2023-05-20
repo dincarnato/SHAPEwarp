@@ -21,6 +21,18 @@ pub(crate) trait GappedSequenceLike {
 }
 
 impl<'a> GappedSequence<'a> {
+    #[cfg(test)]
+    pub(crate) fn new(
+        sequence: Sequence<'a>,
+        alignment: &'a crate::aligner::AlignedSequence,
+    ) -> Self {
+        let alignment = alignment.to_ref();
+        Self {
+            sequence,
+            alignment,
+        }
+    }
+
     #[inline]
     pub(crate) fn iter(&self) -> GappedSequenceIter<'_> {
         IntoIterator::into_iter(self)
@@ -114,6 +126,17 @@ impl Display for GappedSequence<'_> {
 pub(crate) enum StatefulBaseOrGap {
     Base(Base),
     Gap,
+}
+
+impl StatefulBaseOrGap {
+    #[inline]
+    #[cfg(test)]
+    pub(crate) fn to_base(self) -> Option<Base> {
+        match self {
+            Self::Base(base) => Some(base),
+            _ => None,
+        }
+    }
 }
 
 pub(crate) struct GappedSequenceIter<'a> {
