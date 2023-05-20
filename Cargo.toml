@@ -22,6 +22,7 @@ smallvec = "1.8.0"
 tabled = "0.12.0"
 thiserror = "1.0.30"
 toml = "0.5.9"
+viennarna-mfe-sys = { version = "0.1.0", path = "viennarna-mfe-sys" }
 
 [dev-dependencies]
 approx = { version = "0.4.0", features = ["num-complex"] }
