@@ -12,6 +12,7 @@ mod norm_dist;
 mod null_model;
 mod query_aligner;
 mod query_file;
+mod stockholm;
 mod viennarna;
 
 use std::{
@@ -32,7 +33,7 @@ use anyhow::Context;
 use clap::Parser;
 use cli::MinMax;
 use db_file::{ReactivityLike, ReactivityWithPlaceholder};
-use dotbracket::DotBracketBuffered;
+use dotbracket::{DotBracketBuffered, DotBracketOwnedSorted};
 use fftw::{
     array::AlignedVec,
     plan::{C2CPlan, C2CPlan32, C2CPlan64},
@@ -231,7 +232,18 @@ fn main() -> anyhow::Result<()> {
                     })
                     .context("Unable to write report alignment in FASTA format")?;
             }
-            ReportAlignment::Stockholm => todo!("stockholm format is still unimplemented"),
+            ReportAlignment::Stockholm => {
+                results
+                    .try_for_each(|result| {
+                        stockholm::write_result(
+                            result,
+                            &db_entries_orig,
+                            &query_entries_orig,
+                            &alignments_path,
+                        )
+                    })
+                    .context("Unable to write report alignment in stockholm format")?;
+            }
         }
     }
 
@@ -480,7 +492,7 @@ fn handle_query_entry<'a>(
                 let db_end = *db_range.end();
 
                 let (target_bp_support, query_bp_support) = bp_support.unzip();
-                let mfe_pvalue = mfe_pvalue_dotbracket.map(|(mfe_pvalue, _)| mfe_pvalue);
+                let (mfe_pvalue, dotbracket) = mfe_pvalue_dotbracket.unzip();
 
                 QueryResult {
                     query,
@@ -499,6 +511,7 @@ fn handle_query_entry<'a>(
                     target_bp_support,
                     query_bp_support,
                     alignment,
+                    dotbracket,
                 }
             },
         );
@@ -580,6 +593,10 @@ struct QueryResult {
     #[serde(skip)]
     #[tabled(skip)]
     alignment: Arc<AlignmentResult<AlignedSequence>>,
+
+    #[serde(skip)]
+    #[tabled(skip)]
+    dotbracket: Option<DotBracketOwnedSorted>,
 }
 
 impl QueryResult {
@@ -602,6 +619,7 @@ impl QueryResult {
             query_bp_support: Default::default(),
             mfe_pvalue: Default::default(),
             alignment: Default::default(),
+            dotbracket: Default::default(),
         }
     }
 }

@@ -229,6 +229,8 @@ where
 }
 
 pub type DotBracketOwned = DotBracket<Vec<PairedBlock>, false>;
+pub type DotBracketOwnedSorted = DotBracket<Vec<PairedBlock>, true>;
+
 pub type DotBracketBuffered<'a> = DotBracket<&'a mut Vec<PairedBlock>, false>;
 
 impl FromStr for DotBracketOwned {

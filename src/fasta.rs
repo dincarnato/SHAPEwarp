@@ -142,6 +142,7 @@ mod test {
             target_bp_support: Default::default(),
             query_bp_support: Default::default(),
             mfe_pvalue: Default::default(),
+            dotbracket: Default::default(),
         };
 
         let mut writer = vec![];
@@ -175,6 +176,7 @@ mod test {
             target_bp_support: Default::default(),
             query_bp_support: Default::default(),
             mfe_pvalue: Default::default(),
+            dotbracket: Default::default(),
         };
 
         let mut writer = vec![];
@@ -207,6 +209,7 @@ mod test {
             target_bp_support: Default::default(),
             query_bp_support: Default::default(),
             mfe_pvalue: Default::default(),
+            dotbracket: Default::default(),
         };
 
         assert_eq!(
