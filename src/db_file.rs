@@ -176,6 +176,7 @@ impl Serialize for ReactivityWithPlaceholder {
 
 pub trait ReactivityLike: Copy + PartialOrd + PartialEq {
     fn is_nan(self) -> bool;
+    fn value(self) -> Reactivity;
 }
 
 impl ReactivityLike for Reactivity {
@@ -183,12 +184,22 @@ impl ReactivityLike for Reactivity {
     fn is_nan(self) -> bool {
         Reactivity::is_nan(self)
     }
+
+    #[inline]
+    fn value(self) -> Reactivity {
+        self
+    }
 }
 
 impl ReactivityLike for ReactivityWithPlaceholder {
     #[inline]
     fn is_nan(self) -> bool {
         ReactivityWithPlaceholder::is_nan(self)
+    }
+
+    #[inline]
+    fn value(self) -> Reactivity {
+        self.to_maybe_placeholder()
     }
 }
 
