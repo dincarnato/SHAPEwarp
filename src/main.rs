@@ -1286,7 +1286,7 @@ fn write_cli_to_file(cli: &Cli) -> anyhow::Result<()> {
 
     let mut file =
         File::create(cli.output.join("params.out")).context("Unable to create params.out file")?;
-    file.write_all(&toml::to_vec(cli).context("Unable to convert cli to TOML")?)
+    file.write_all(&toml_edit::ser::to_vec(cli).context("Unable to convert cli to TOML")?)
         .context("Unable to write to params.out")?;
 
     Ok(())
