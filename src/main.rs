@@ -229,7 +229,9 @@ fn main() -> anyhow::Result<()> {
     if results.is_empty() {
         println!("No match found with current search settings.")
     } else {
-        println!("{}", Table::new(results).with(tabled::Style::empty()));
+        use tabled::settings::Style;
+
+        println!("{}", Table::new(results).with(Style::empty()));
     }
 
     Ok(())
