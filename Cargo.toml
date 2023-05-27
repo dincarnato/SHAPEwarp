@@ -7,7 +7,7 @@ license = "GPL-3.0-or-later"
 [dependencies]
 anyhow = "1.0.58"
 bitflags = "2.3.1"
-clap = { version = "3.1.12", features = ["derive"] }
+clap = { version = "4.3.0", features = ["derive"] }
 csv = "1.1.6"
 fftw = "0.8.0"
 fnv = "1.0.7"

@@ -1,4 +1,4 @@
-use clap::{ArgEnum, ArgGroup, Args, Parser};
+use clap::{ArgGroup, Args, Parser, ValueEnum};
 use serde::Serialize;
 use std::{fmt, ops::Range, path::PathBuf, str::FromStr};
 
@@ -10,7 +10,7 @@ use crate::{Distance, Reactivity};
     version,
     about,
     group(
-        ArgGroup::new("fold-opt-group").args(&["fold-query", "eval-align-fold"])
+        ArgGroup::new("fold_opt_group").args(&["fold_query", "eval_align_fold"])
     ),
     allow_negative_numbers = true,
 )]
@@ -101,7 +101,7 @@ pub struct Cli {
     /// Reports sequence alignments in the specified format ([f]asta or [s]tockholm)
     ///
     /// Note: alignments are reported only for matches below the inclusion E-value cutoff
-    #[clap(long, alias = "reportAln", arg_enum)]
+    #[clap(long, alias = "reportAln", value_enum)]
     pub report_alignment: Option<ReportAlignment>,
 
     /// Reports reactivity for sequence alignments in the "reactivities" folder inside the output
@@ -143,11 +143,11 @@ pub struct Cli {
 #[serde(rename_all = "kebab-case")]
 pub struct FoldingArgs {
     /// Slope for SHAPE reactivities conversion into pseudo-free energy contributions
-    #[clap(long, default_value_t = 1.8, requires = "fold-opt-group")]
+    #[clap(long, default_value_t = 1.8, requires = "fold_opt_group")]
     pub slope: Reactivity,
 
     /// Intercept for SHAPE reactivities conversion into pseudo-free energy contributions
-    #[clap(long, default_value_t = -0.6, requires = "fold-opt-group")]
+    #[clap(long, default_value_t = -0.6, requires = "fold_opt_group")]
     pub intercept: Reactivity,
 
     /// Maximum allowed base-pairing distance
@@ -155,20 +155,20 @@ pub struct FoldingArgs {
         long,
         default_value_t = 600,
         alias = "maxBPspan",
-        requires = "fold-opt-group"
+        requires = "fold_opt_group"
     )]
     pub max_bp_span: u32,
 
     /// Disallows lonely pairs (helices of 1 bp)
-    #[clap(long, alias = "noLonelyPairs", requires = "fold-opt-group")]
+    #[clap(long, alias = "noLonelyPairs", requires = "fold_opt_group")]
     pub no_lonely_pairs: bool,
 
     /// Disallows G:U wobbles at the end of helices
-    #[clap(long, alias = "noClosingGU", requires = "fold-opt-group")]
+    #[clap(long, alias = "noClosingGU", requires = "fold_opt_group")]
     pub no_closing_gu: bool,
 
     /// Folding temperature
-    #[clap(long, default_value_t = 37., requires = "fold-opt-group")]
+    #[clap(long, default_value_t = 37., requires = "fold_opt_group")]
     pub temperature: f32,
 
     #[clap(
@@ -187,21 +187,21 @@ pub struct QueryFoldingArgs {
         long,
         default_value_t = 800,
         alias = "winSize",
-        requires = "fold-query"
+        requires = "fold_query"
     )]
     pub win_size: u32,
 
     /// Offset (in nt) for partition function window sliding
-    #[clap(long, default_value_t = 200, requires = "fold-query")]
+    #[clap(long, default_value_t = 200, requires = "fold_query")]
     pub offset: u32,
 
     /// Number of bases to trim from both ends of partition function windows to avoid terminal
     /// biases
-    #[clap(long, default_value_t = 50, alias = "winTrim", requires = "fold-query")]
+    #[clap(long, default_value_t = 50, alias = "winTrim", requires = "fold_query")]
     pub win_trim: u32,
 
     /// SHAPE reactivity is ignored when folding the query
-    #[clap(long = "ignore-react", alias = "ignoreReact", requires = "fold-query")]
+    #[clap(long = "ignore-react", alias = "ignoreReact", requires = "fold_query")]
     #[serde(rename = "ignore-react")]
     pub ignore_reactivity: bool,
 }
@@ -233,7 +233,7 @@ pub struct KmerLookupArgs {
     /// Maximum allowed GC% difference to retain a kmer match
     ///
     /// Note: the default value is automatically determined based on the chosen kmer length
-    #[clap(long, requires = "match-kmer-gc-content", alias = "kmerMaxGCdiff")]
+    #[clap(long, requires = "match_kmer_gc_content", alias = "kmerMaxGCdiff")]
     pub kmer_max_gc_diff: Option<f32>,
 
     /// The sequence of a query kmer and the corresponding database match must differ no more than
@@ -246,7 +246,7 @@ pub struct KmerLookupArgs {
     /// Note: when >= 1, this is interpreted as the absolute number of bases that are allowed to
     /// differ between the kmer and the matching region. When < 1, this is interpreted as a
     /// fraction of the kmer's length
-    #[clap(long, requires = "match-kmer-seq", alias = "kmerMaxSeqDist")]
+    #[clap(long, requires = "match_kmer_seq", alias = "kmerMaxSeqDist")]
     pub kmer_max_seq_dist: Option<Distance<u32>>,
 
     /// Minimum complexity (measured as Gini coefficient) of candidate kmers
@@ -301,7 +301,7 @@ pub struct AlignmentArgs {
     #[clap(
         long,
         default_value_t = 0.5,
-        requires = "align-score-seq",
+        requires = "align_score_seq",
         alias = "alignSeqMatchScore"
     )]
     pub align_seq_match_score: f32,
@@ -310,7 +310,7 @@ pub struct AlignmentArgs {
     #[clap(
         long,
         default_value_t = -2.,
-        requires = "align-score-seq",
+        requires = "align_score_seq",
         alias = "alignSeqMismatchScore"
     )]
     pub align_seq_mismatch_score: f32,
@@ -425,7 +425,7 @@ where
 
 impl<T> std::error::Error for ParseMinMaxError<T> where T: std::error::Error {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ArgEnum, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize)]
 pub enum ReportAlignment {
     #[clap(alias = "f")]
     Fasta,
