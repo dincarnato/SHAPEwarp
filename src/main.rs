@@ -241,6 +241,7 @@ fn main() -> anyhow::Result<()> {
             }
             ReportAlignment::Stockholm => {
                 results
+                    .filter(|result| result.dotbracket.is_some())
                     .try_for_each(|result| {
                         stockholm::write_result(
                             result,
