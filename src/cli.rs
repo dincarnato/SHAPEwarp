@@ -348,10 +348,6 @@ pub struct AlignmentFoldingEvaluationArgs {
     /// P-value threshold to consider signficant an RNA structure predicted by RNAalifold
     #[clap(long, default_value_t = 0.05, alias = "alignFoldPvalue")]
     pub align_fold_pvalue: f32,
-
-    /// Path to RNAalifold executable (Default: assumes RNAalifold is in PATH)
-    #[clap(long, alias = "RNAalifold")]
-    pub rna_alifold: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
