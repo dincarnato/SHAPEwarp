@@ -28,7 +28,7 @@ toml = "0.5.9"
 viennarna-mfe-sys = { version = "0.1.0", path = "viennarna-mfe-sys" }
 
 [dev-dependencies]
-approx = { version = "0.4.0", features = ["num-complex"] }
+approx = { version = "0.5.1", features = ["num-complex"] }
 rand = { version = "0.8.5", features = ["small_rng"] }
 tempfile = "3.5.0"
 
