@@ -46,7 +46,7 @@ impl PartialEq for Cell {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct AlignResult<Alignment> {
     pub(crate) query_index: usize,
     pub(crate) query_alignment: Alignment,
@@ -84,6 +84,8 @@ pub(crate) trait AlignBehavior {
         downstream: Self::Alignment,
         seed_size: NonZeroUsize,
     ) -> Self::Alignment;
+
+    fn empty_alignment() -> Self::Alignment;
 }
 
 pub(crate) struct NoOpBehavior;
@@ -110,6 +112,9 @@ impl AlignBehavior for NoOpBehavior {
         _seed_size: NonZeroUsize,
     ) -> Self::Alignment {
     }
+
+    #[inline(always)]
+    fn empty_alignment() -> Self::Alignment {}
 }
 
 impl AlignBehavior for BacktrackBehavior {
@@ -175,6 +180,10 @@ impl AlignBehavior for BacktrackBehavior {
         );
         upstream
     }
+
+    fn empty_alignment() -> Self::Alignment {
+        AlignedSequence(vec![BaseOrGap::Base])
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -231,97 +240,96 @@ impl<'a> Aligner<'a> {
             direction,
         } = params;
 
-        let trimmed_query_range = trimmed_range(query.reactivity());
-        let trimmed_target_range = trimmed_range(target.reactivity());
-
         match direction {
-            Direction::Downstream => {
-                let query_start = (*query_range.end() + 1).min(trimmed_query_range.end);
-                let target_start = (*target_range.end() + 1).min(trimmed_target_range.end);
-                let tolerance = align_tolerance.downstream;
-                let query = EntrySlice::forward(
-                    query,
-                    query_start
-                        ..trimmed_query_range
-                            .end
-                            .min(query_start.saturating_add(tolerance)),
-                );
-                let target = EntrySlice::forward(
-                    target,
-                    target_start
-                        ..trimmed_target_range
-                            .end
-                            .min(target_start.saturating_add(tolerance)),
-                );
-
-                if query.is_empty() || target.is_empty() {
-                    return AlignResult {
-                        query_index: query_start.saturating_sub(1),
-                        query_alignment: Default::default(),
-                        target_index: target_start.saturating_sub(1),
-                        target_alignment: Default::default(),
+            Direction::Downstream => get_downstream_alignment(
+                query_range,
+                target_range,
+                query,
+                target,
+                align_tolerance.downstream,
+            )
+            .map_or_else(
+                |PartialEmptyAlignResult {
+                     query_index,
+                     target_index,
+                 }| {
+                    AlignResult {
+                        query_index,
+                        query_alignment: Behavior::empty_alignment(),
+                        target_index,
+                        target_alignment: Behavior::empty_alignment(),
                         score: seed_score,
-                    };
-                }
+                    }
+                },
+                |PartialAlignmentData {
+                     query,
+                     target,
+                     query_range,
+                     target_range,
+                 }| {
+                    let best_cell = self.handle_slices(&query, &target, seed_score);
+                    let target_index = target_range.start.checked_sub(1).unwrap() + best_cell[0];
+                    let query_index = query_range.start.checked_sub(1).unwrap() + best_cell[1];
+                    let score = self.matrix[best_cell].score;
+                    let AlignmentResult {
+                        query: query_alignment,
+                        target: target_alignment,
+                    } = Behavior::get_alignment::<true>(&self.matrix, best_cell);
 
-                let best_cell = self.handle_slices(&query, &target, seed_score);
-                let target_index = target_start + best_cell[0] - 1;
-                let query_index = query_start + best_cell[1] - 1;
-                let score = self.matrix[best_cell].score;
-                let AlignmentResult {
-                    query: query_alignment,
-                    target: target_alignment,
-                } = Behavior::get_alignment::<true>(&self.matrix, best_cell);
+                    AlignResult {
+                        query_index,
+                        query_alignment,
+                        target_index,
+                        target_alignment,
+                        score,
+                    }
+                },
+            ),
 
-                AlignResult {
-                    query_index,
-                    query_alignment,
-                    target_index,
-                    target_alignment,
-                    score,
-                }
-            }
-
-            Direction::Upstream => {
-                let tolerance = align_tolerance.upstream;
-                let query_end = (*query_range.start()).max(trimmed_query_range.start);
-                let target_end = (*target_range.start()).max(trimmed_target_range.start);
-                let query_start = query_end
-                    .saturating_sub(tolerance)
-                    .min(trimmed_query_range.end);
-                let target_start = target_end
-                    .saturating_sub(tolerance)
-                    .min(trimmed_target_range.end);
-                let query = EntrySlice::backward(query, query_start..query_end);
-                let target = EntrySlice::backward(target, target_start..target_end);
-
-                if query.is_empty() || target.is_empty() {
-                    return AlignResult {
-                        query_index: query_end.saturating_sub(1),
-                        query_alignment: Default::default(),
-                        target_index: target_end.saturating_sub(1),
-                        target_alignment: Default::default(),
+            Direction::Upstream => get_upstream_alignment(
+                query_range,
+                target_range,
+                query,
+                target,
+                align_tolerance.upstream,
+            )
+            .map_or_else(
+                |PartialEmptyAlignResult {
+                     query_index,
+                     target_index,
+                 }| {
+                    AlignResult {
+                        query_index,
+                        query_alignment: Behavior::empty_alignment(),
+                        target_index,
+                        target_alignment: Behavior::empty_alignment(),
                         score: seed_score,
-                    };
-                }
+                    }
+                },
+                |PartialAlignmentData {
+                     query,
+                     target,
+                     query_range,
+                     target_range,
+                 }| {
+                    let best_cell = self.handle_slices(&query, &target, seed_score);
+                    let target_index = target_range.end.checked_sub(best_cell[0]).unwrap();
+                    let query_index = query_range.end.checked_sub(best_cell[1]).unwrap();
+                    let score = self.matrix[best_cell].score;
+                    let AlignmentResult {
+                        query: query_alignment,
+                        target: target_alignment,
+                    } = Behavior::get_alignment::<true>(&self.matrix, best_cell);
 
-                let best_cell = self.handle_slices(&query, &target, seed_score);
-                let target_index = target_end.checked_sub(best_cell[0]).unwrap();
-                let query_index = query_end.checked_sub(best_cell[1]).unwrap();
-                let score = self.matrix[best_cell].score;
-                let AlignmentResult {
-                    query: query_alignment,
-                    target: target_alignment,
-                } = Behavior::get_alignment::<true>(&self.matrix, best_cell);
-
-                AlignResult {
-                    query_index,
-                    query_alignment,
-                    target_index,
-                    target_alignment,
-                    score,
-                }
-            }
+                    AlignResult {
+                        query_index,
+                        query_alignment,
+                        target_index,
+                        target_alignment,
+                        score,
+                    }
+                },
+            ),
         }
     }
 
@@ -615,6 +623,169 @@ impl<'a> Aligner<'a> {
     }
 }
 
+#[derive(Debug, PartialEq)]
+struct PartialAlignmentData<'a, const FW: bool> {
+    query: EntrySlice<'a, ReactivityWithPlaceholder, FW>,
+    target: EntrySlice<'a, ReactivityWithPlaceholder, FW>,
+    query_range: Range<usize>,
+    target_range: Range<usize>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct PartialEmptyAlignResult {
+    query_index: usize,
+    target_index: usize,
+}
+
+fn get_downstream_alignment<'a>(
+    query_range: RangeInclusive<usize>,
+    target_range: RangeInclusive<usize>,
+    query: &'a query_file::Entry,
+    target: &'a db_file::Entry,
+    tolerance: usize,
+) -> Result<PartialAlignmentData<'a, true>, PartialEmptyAlignResult> {
+    let (query, out_query_range) =
+        get_downstream_alignment_range_trim(query, query_range.clone(), tolerance);
+    let (target, out_target_range) =
+        get_downstream_alignment_range_no_trim(target, target_range.clone(), tolerance);
+
+    if query.is_empty() || target.is_empty() {
+        Err(PartialEmptyAlignResult {
+            query_index: *query_range.end(),
+            target_index: *target_range.end(),
+        })
+    } else {
+        Ok(PartialAlignmentData {
+            query,
+            target,
+            query_range: out_query_range,
+            target_range: out_target_range,
+        })
+    }
+}
+
+fn get_downstream_alignment_range_trim<T, R>(
+    seq: &T,
+    range: RangeInclusive<usize>,
+    tolerance: usize,
+) -> (EntrySlice<'_, R, true>, Range<usize>)
+where
+    T: SequenceEntry<Reactivity = R>,
+    R: ReactivityLike,
+{
+    let trimmed_range = trimmed_range(seq.reactivity());
+    // We need to exclude the last base of the seed
+    let start = range.end().saturating_add(1);
+
+    // Exclusive end
+    let end = start
+        .saturating_add(tolerance)
+        .clamp(trimmed_range.start, trimmed_range.end);
+
+    let start = start.clamp(trimmed_range.start, trimmed_range.end);
+    let range = start..end;
+    let entry_slice = EntrySlice::forward(seq, range.clone());
+    debug_assert_eq!(entry_slice.len(), range.len());
+
+    (entry_slice, range)
+}
+
+fn get_downstream_alignment_range_no_trim<T, R>(
+    seq: &T,
+    range: RangeInclusive<usize>,
+    tolerance: usize,
+) -> (EntrySlice<'_, R, true>, Range<usize>)
+where
+    T: SequenceEntry<Reactivity = R>,
+    R: ReactivityLike,
+{
+    let len = seq.reactivity().len();
+    // We need to exclude the last base of the seed
+    let start = range.end().saturating_add(1);
+
+    // Exclusive end
+    let end = start.saturating_add(tolerance).min(len);
+
+    let start = start.min(len);
+    let range = start..end;
+    let entry_slice = EntrySlice::forward(seq, range.clone());
+    debug_assert_eq!(entry_slice.len(), range.len());
+
+    (entry_slice, range)
+}
+
+fn get_upstream_alignment<'a>(
+    query_range: RangeInclusive<usize>,
+    target_range: RangeInclusive<usize>,
+    query: &'a query_file::Entry,
+    target: &'a db_file::Entry,
+    tolerance: usize,
+) -> Result<PartialAlignmentData<'a, false>, PartialEmptyAlignResult> {
+    let (query, query_range) = get_upstream_alignment_range_trim(query, query_range, tolerance);
+    let (target, target_range) =
+        get_upstream_alignment_range_no_trim(target, target_range, tolerance);
+
+    if query.is_empty() || target.is_empty() {
+        Err(PartialEmptyAlignResult {
+            query_index: query_range.end,
+            target_index: target_range.end,
+        })
+    } else {
+        Ok(PartialAlignmentData {
+            query,
+            target,
+            query_range,
+            target_range,
+        })
+    }
+}
+
+fn get_upstream_alignment_range_trim<T, R>(
+    seq: &T,
+    range: RangeInclusive<usize>,
+    tolerance: usize,
+) -> (EntrySlice<'_, R, false>, Range<usize>)
+where
+    T: SequenceEntry<Reactivity = R>,
+    R: ReactivityLike,
+{
+    let trimmed_range = trimmed_range(seq.reactivity());
+
+    // Exclusive end
+    let end = *range.start();
+    let start = end
+        .saturating_sub(tolerance)
+        .clamp(trimmed_range.start, trimmed_range.end);
+    let end = end.clamp(trimmed_range.start, trimmed_range.end);
+    let range = start..end;
+    let entry_slice = EntrySlice::backward(seq, range.clone());
+    debug_assert_eq!(entry_slice.len(), range.len());
+
+    (entry_slice, range)
+}
+
+fn get_upstream_alignment_range_no_trim<T, R>(
+    seq: &T,
+    range: RangeInclusive<usize>,
+    tolerance: usize,
+) -> (EntrySlice<'_, R, false>, Range<usize>)
+where
+    T: SequenceEntry<Reactivity = R>,
+    R: ReactivityLike,
+{
+    let len = seq.reactivity().len();
+
+    // Exclusive end
+    let end = *range.start();
+    let start = end.saturating_sub(tolerance).min(len);
+    let end = end.min(len);
+    let range = start..end;
+    let entry_slice = EntrySlice::backward(seq, range.clone());
+    debug_assert_eq!(entry_slice.len(), range.len());
+
+    (entry_slice, range)
+}
+
 fn score_from_gap(cell: &Cell, alignment_args: &AlignmentArgs) -> Reactivity {
     use Traceback::*;
 
@@ -632,7 +803,7 @@ pub(crate) enum Direction {
     Downstream,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 struct EntrySlice<'a, T, const FW: bool> {
     sequence: &'a [Base],
     reactivity: &'a [T],
@@ -886,6 +1057,8 @@ mod tests {
     use std::path::Path;
 
     use ndarray::array;
+
+    use crate::Molecule;
 
     use super::*;
 
@@ -1503,5 +1676,283 @@ mod tests {
         use std::f32::NAN;
         let data = [NAN, NAN, NAN, 1., NAN, 3., 4., 5., NAN, NAN];
         assert_eq!(trimmed_range(&data), 3..8);
+    }
+
+    #[test]
+    fn downstream_alignment_range_untrimmed() {
+        let query = query_file::Entry::new_unchecked(
+            "query",
+            vec![Base::T; 13],
+            vec![ReactivityWithPlaceholder::from(Reactivity::NAN); 13],
+            Molecule::Dna,
+        );
+
+        assert_eq!(get_downstream_alignment_range_no_trim(&query, 2..=5, 4).1, 6..10);
+
+        // Everything's fine until one before last base
+        assert_eq!(get_downstream_alignment_range_no_trim(&query, 2..=5, 6).1, 6..12);
+
+        // Everything's fine until last base
+        assert_eq!(get_downstream_alignment_range_no_trim(&query, 2..=5, 7).1, 6..13);
+
+        // Query range has to be clamped
+        assert_eq!(get_downstream_alignment_range_no_trim(&query, 2..=5, 8).1, 6..13);
+    }
+
+    #[test]
+    fn downstream_alignment_range_trimmed() {
+        let query = query_file::Entry::new_unchecked(
+            "query",
+            vec![Base::T; 16],
+            iter::repeat(Reactivity::NAN)
+                .take(3)
+                .chain(iter::repeat(1.).take(8))
+                .chain(iter::repeat(Reactivity::NAN).take(5))
+                .map(ReactivityWithPlaceholder::from)
+                .collect(),
+            Molecule::Dna,
+        );
+
+        assert!(query.reactivity()[10].is_nan().not());
+        assert!(query.reactivity()[11].is_nan());
+
+        assert_eq!(
+            get_downstream_alignment_range_trim(&query, 2..=4, 3).1,
+            5..8
+        );
+
+        // Everything's fine until one before last base
+        assert_eq!(
+            get_downstream_alignment_range_trim(&query, 2..=4, 5).1,
+            5..10
+        );
+
+        // Everything's fine until last base
+        assert_eq!(
+            get_downstream_alignment_range_trim(&query, 2..=4, 6).1,
+            5..11
+        );
+
+        // Query range has to be clamped
+        assert_eq!(
+            get_downstream_alignment_range_trim(&query, 2..=4, 7).1,
+            5..11
+        );
+        assert_eq!(
+            get_downstream_alignment_range_trim(&query, 8..=10, 5).1,
+            11..11
+        );
+
+        // 'start' is clamped after 'end' is evaluated
+        assert_eq!(
+            get_downstream_alignment_range_trim(&query, 0..=0, 5).1,
+            3..6
+        );
+
+        // 'end' is clamped
+        assert_eq!(
+            get_downstream_alignment_range_trim(&query, 0..=0, 1).1,
+            3..3
+        );
+        assert_eq!(
+            get_downstream_alignment_range_trim(&query, 6..=8, 6).1,
+            9..11
+        );
+
+        // Both 'start' and 'end' are clamped when range is completely in NAN
+        assert_eq!(
+            get_downstream_alignment_range_trim(&query, 11..=13, 6).1,
+            11..11
+        );
+    }
+
+    #[test]
+    fn downstream_alignment() {
+        let query = query_file::Entry::new_unchecked(
+            "query",
+            vec![Base::T; 13],
+            vec![ReactivityWithPlaceholder::from(1.); 13],
+            Molecule::Dna,
+        );
+
+        let target = db_file::Entry {
+            id: "target".to_string(),
+            sequence: vec![Base::A; 20],
+            reactivity: vec![ReactivityWithPlaceholder::try_from(1.).unwrap(); 20],
+        };
+
+        // All ranges have to be clamped
+        assert!(matches!(
+            get_downstream_alignment(2..=5, 8..=11, &query, &target, 9).unwrap(),
+            PartialAlignmentData {
+                query_range,
+                target_range,
+                ..
+            }
+            if query_range == (6..13)
+            && target_range == (12..20)
+        ));
+
+        assert_eq!(
+            get_downstream_alignment(9..=12, 8..=11, &query, &target, 5).unwrap_err(),
+            PartialEmptyAlignResult {
+                query_index: 12,
+                target_index: 11,
+            }
+        );
+
+        assert_eq!(
+            get_downstream_alignment(2..=5, 16..=19, &query, &target, 5).unwrap_err(),
+            PartialEmptyAlignResult {
+                query_index: 5,
+                target_index: 19,
+            }
+        );
+
+        assert_eq!(
+            get_downstream_alignment(10..=12, 17..=19, &query, &target, 5).unwrap_err(),
+            PartialEmptyAlignResult {
+                query_index: 12,
+                target_index: 19,
+            }
+        );
+    }
+
+    #[test]
+    fn upstream_alignment_range_untrimmed() {
+        let query = query_file::Entry::new_unchecked(
+            "query",
+            vec![Base::T; 13],
+            vec![ReactivityWithPlaceholder::from(Reactivity::NAN); 13],
+            Molecule::Dna,
+        );
+
+        assert_eq!(
+            get_upstream_alignment_range_no_trim(&query, 8..=11, 5).1,
+            3..8
+        );
+        assert_eq!(
+            get_upstream_alignment_range_no_trim(&query, 8..=11, 7).1,
+            1..8
+        );
+        assert_eq!(
+            get_upstream_alignment_range_no_trim(&query, 8..=11, 8).1,
+            0..8
+        );
+        assert_eq!(
+            get_upstream_alignment_range_no_trim(&query, 8..=11, 9).1,
+            0..8
+        );
+    }
+
+    #[test]
+    fn upstream_alignment_range_trimmed() {
+        let query = query_file::Entry::new_unchecked(
+            "query",
+            vec![Base::T; 16],
+            iter::repeat(Reactivity::NAN)
+                .take(5)
+                .chain(iter::repeat(1.).take(8))
+                .chain(iter::repeat(Reactivity::NAN).take(3))
+                .map(ReactivityWithPlaceholder::from)
+                .collect(),
+            Molecule::Dna,
+        );
+
+        assert!(query.reactivity()[4].is_nan());
+        assert!(query.reactivity()[5].is_nan().not());
+        assert!(query.reactivity()[12].is_nan().not());
+        assert!(query.reactivity()[13].is_nan());
+
+        assert_eq!(
+            get_upstream_alignment_range_trim(&query, 11..=13, 4).1,
+            7..11
+        );
+
+        // Everything's fine until second base available
+        assert_eq!(
+            get_upstream_alignment_range_trim(&query, 11..=13, 5).1,
+            6..11
+        );
+
+        // Everything's fine until first base available
+        assert_eq!(
+            get_upstream_alignment_range_trim(&query, 11..=13, 6).1,
+            5..11
+        );
+
+        // Query range has to be clamped
+        assert_eq!(
+            get_upstream_alignment_range_trim(&query, 11..=13, 7).1,
+            5..11
+        );
+
+        // 'end' is clamped after 'start' is evaluated
+        assert_eq!(
+            get_upstream_alignment_range_trim(&query, 15..=15, 5).1,
+            10..13
+        );
+
+        // 'start' is clamped
+        assert_eq!(
+            get_upstream_alignment_range_trim(&query, 15..=15, 1).1,
+            13..13
+        );
+        assert_eq!(get_upstream_alignment_range_trim(&query, 7..=9, 6).1, 5..7);
+
+        // Both 'start' and 'end' are clamped when range is completely in NAN
+        assert_eq!(get_upstream_alignment_range_trim(&query, 5..=7, 5).1, 5..5);
+    }
+
+    #[test]
+    fn upstream_alignment() {
+        let query = query_file::Entry::new_unchecked(
+            "query",
+            vec![Base::T; 13],
+            vec![ReactivityWithPlaceholder::from(1.); 13],
+            Molecule::Dna,
+        );
+
+        let target = db_file::Entry {
+            id: "target".to_string(),
+            sequence: vec![Base::A; 20],
+            reactivity: vec![ReactivityWithPlaceholder::try_from(1.).unwrap(); 20],
+        };
+
+        // All ranges have to be clamped
+        assert!(matches!(
+            get_upstream_alignment(8..=11, 9..=12, &query, &target, 9).unwrap(),
+            PartialAlignmentData {
+                query_range,
+                target_range,
+                ..
+            }
+            if query_range == (0..8)
+            && target_range == (0..9)
+        ));
+
+        assert_eq!(
+            get_upstream_alignment(0..=4, 8..=11, &query, &target, 5).unwrap_err(),
+            PartialEmptyAlignResult {
+                query_index: 0,
+                target_index: 8,
+            }
+        );
+
+        assert_eq!(
+            get_upstream_alignment(2..=5, 0..=4, &query, &target, 5).unwrap_err(),
+            PartialEmptyAlignResult {
+                query_index: 2,
+                target_index: 0,
+            }
+        );
+
+        assert_eq!(
+            get_upstream_alignment(0..=3, 0..=3, &query, &target, 5).unwrap_err(),
+            PartialEmptyAlignResult {
+                query_index: 0,
+                target_index: 0,
+            }
+        );
     }
 }

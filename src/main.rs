@@ -366,6 +366,30 @@ fn handle_query_entry<'a>(
         )?
         .into_iter(&query_all_results, &mut aligner)
         .map(|result| {
+            assert_eq!(
+                result.alignment.query.0.len(),
+                result.alignment.target.0.len()
+            );
+
+            assert_eq!(
+                result.db.end() - result.db.start()
+                    + result
+                        .alignment
+                        .target
+                        .0
+                        .iter()
+                        .filter(|bog| bog.is_base().not())
+                        .count(),
+                result.query.end() - result.query.start()
+                    + result
+                        .alignment
+                        .query
+                        .0
+                        .iter()
+                        .filter(|bog| bog.is_base().not())
+                        .count(),
+            );
+
             let p_value = null_distribution.p_value(result.score);
 
             // FIXME: we need to avoid this clone

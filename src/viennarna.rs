@@ -118,10 +118,10 @@ impl FoldCompound {
             .map(|sequence| sequence.to_cstring(Some(Molecule::Rna)));
         let first_sequence = iter.next().ok_or(FoldCompoundError::NoSequences)?;
 
-        let sequence_len = first_sequence.as_bytes().len();
+        let sequence_len = first_sequence.to_bytes().len();
         let sequences = iter::once(Ok(first_sequence))
             .chain(iter.map(|sequence| {
-                (sequence.as_bytes().len() == sequence_len)
+                (sequence.to_bytes().len() == sequence_len)
                     .then_some(sequence)
                     .ok_or(FoldCompoundError::UnequalSequences)
             }))

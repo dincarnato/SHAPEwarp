@@ -17,6 +17,22 @@ pub struct Entry {
 }
 
 impl Entry {
+    #[cfg(test)]
+    pub(crate) fn new_unchecked(
+        name: impl Into<Arc<str>>,
+        sequence: Vec<Base>,
+        reactivities: Vec<ReactivityWithPlaceholder>,
+        molecule: Molecule,
+    ) -> Self {
+        let name = name.into();
+        Self {
+            name,
+            sequence,
+            reactivities,
+            molecule,
+        }
+    }
+
     pub fn cap_reactivities(&mut self, max_reactivity: Reactivity) {
         self.reactivities.iter_mut().for_each(|reactivity| {
             if let Some(x) = reactivity.get_non_nan() {
@@ -94,7 +110,7 @@ pub fn read_file(path: &Path) -> Result<Vec<Entry>, Error> {
     read_file_content(reader)
 }
 
-fn read_file_content<R>(mut reader: R) -> Result<Vec<Entry>, Error>
+pub fn read_file_content<R>(mut reader: R) -> Result<Vec<Entry>, Error>
 where
     R: BufRead,
 {
