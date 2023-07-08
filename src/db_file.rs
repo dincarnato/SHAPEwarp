@@ -2,12 +2,11 @@ use std::{
     convert::TryInto,
     fs::File,
     io::{self, BufReader, Read, Seek, SeekFrom},
-    mem,
     path::Path,
 };
 
 use itertools::Itertools;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Serialize, Serializer};
 
 use crate::{Base, Molecule, Reactivity, SequenceEntry};
 
@@ -38,12 +37,12 @@ where
             return Err(ReaderError::InvalidMarker.into());
         }
 
-        let _db_len = u64::from_le_bytes(end_buf[0..8].try_into().unwrap());
-        let _version = u16::from_le_bytes(end_buf[8..10].try_into().unwrap());
+        let db_len = u64::from_le_bytes(end_buf[0..8].try_into().unwrap());
+        let version = u16::from_le_bytes(end_buf[8..10].try_into().unwrap());
         Ok(Self {
             reader,
-            _db_len,
-            _version,
+            _db_len: db_len,
+            _version: version,
             end_offset,
         })
     }
@@ -79,7 +78,7 @@ pub struct Entry {
 
 const NAN_PLACEHOLDER: Reactivity = -999.;
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy)]
 #[repr(transparent)]
 pub struct ReactivityWithPlaceholder(Reactivity);
 
@@ -108,7 +107,7 @@ impl ReactivityWithPlaceholder {
         // Safety:
         // - `ReactivityWithPlaceholder` is transparent and it contains only a `Reactivity`
         // - lifetime is maintained
-        unsafe { mem::transmute(this) }
+        unsafe { &*(this as *const [ReactivityWithPlaceholder] as *const [Reactivity]) }
     }
 
     pub fn inner(self) -> Reactivity {
@@ -307,6 +306,9 @@ where
             })
             // Reactivity is an alias to either f32 or f64
             .map_ok(|bytes| {
+                // We internally use a fixed type that can be f32, there is no need to necessarily
+                // have 64 bits of precision
+                #[allow(clippy::cast_possible_truncation)]
                 let reactivity = f64::from_le_bytes(bytes) as Reactivity;
                 ReactivityWithPlaceholder::from(reactivity)
             })
@@ -438,8 +440,14 @@ mod tests {
     #[test]
     fn valid_reader() {
         let reader = Reader::new(Cursor::new(TEST_DB)).unwrap();
-        assert_eq!(reader._db_len, 0x1181);
-        assert_eq!(reader._version, 1);
+        #[allow(clippy::used_underscore_binding)]
+        let len = reader._db_len;
+
+        #[allow(clippy::used_underscore_binding)]
+        let version = reader._version;
+
+        assert_eq!(len, 0x1181);
+        assert_eq!(version, 1);
     }
 
     #[test]
@@ -450,7 +458,10 @@ mod tests {
             .map_ok(|entry| entry.sequence.len())
             .try_fold(0, |acc, seq_len| seq_len.map(|seq_len| acc + seq_len))
             .unwrap();
-        assert_eq!(db_len, usize::try_from(reader._db_len).unwrap());
+
+        #[allow(clippy::used_underscore_binding)]
+        let reader_len = usize::try_from(reader._db_len).unwrap();
+        assert_eq!(db_len, reader_len);
     }
 
     #[test]
@@ -462,6 +473,6 @@ mod tests {
         assert!(entry.reactivity[..13]
             .iter()
             .copied()
-            .all(|reactivity| reactivity.is_nan()));
+            .all(ReactivityWithPlaceholder::is_nan));
     }
 }

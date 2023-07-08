@@ -9,8 +9,8 @@ use num_traits::{float::FloatCore, Float};
 use crate::{db_file::ReactivityWithPlaceholder, mean_stddev, C2CPlanExt, Reactivity};
 
 pub(crate) struct Mass {
-    fw_plan: <Reactivity as C2CPlanExt>::Plan,
-    bw_plan: <Reactivity as C2CPlanExt>::Plan,
+    forward_plan: <Reactivity as C2CPlanExt>::Plan,
+    backward_plan: <Reactivity as C2CPlanExt>::Plan,
     aligned_query: AlignedVec<Complex<Reactivity>>,
     query_transform: AlignedVec<Complex<Reactivity>>,
     product: AlignedVec<Complex<Reactivity>>,
@@ -19,9 +19,9 @@ pub(crate) struct Mass {
 
 impl Mass {
     pub(crate) fn new(size: usize) -> Result<Self, fftw::error::Error> {
-        let fw_plan: <Reactivity as C2CPlanExt>::Plan =
+        let forward_plan: <Reactivity as C2CPlanExt>::Plan =
             C2CPlan::aligned(&[size], Sign::Forward, Flag::ESTIMATE)?;
-        let bw_plan: <Reactivity as C2CPlanExt>::Plan =
+        let backward_plan: <Reactivity as C2CPlanExt>::Plan =
             C2CPlan::aligned(&[size], Sign::Backward, Flag::ESTIMATE)?;
         let aligned_query = AlignedVec::new(size);
         let query_transform = aligned_query.clone();
@@ -29,8 +29,8 @@ impl Mass {
         let product_inverse = aligned_query.clone();
 
         Ok(Self {
-            fw_plan,
-            bw_plan,
+            forward_plan,
+            backward_plan,
             aligned_query,
             query_transform,
             product,
@@ -53,7 +53,7 @@ impl Mass {
             .copied()
             .zip(self.aligned_query.iter_mut())
             .for_each(|(q, y)| y.re = q);
-        self.fw_plan
+        self.forward_plan
             .c2c(&mut self.aligned_query, &mut self.query_transform)?;
 
         self.product
@@ -62,10 +62,11 @@ impl Mass {
             .zip(&*self.query_transform)
             .for_each(|((z, x), y)| *z = x * y);
 
-        self.bw_plan
+        self.backward_plan
             .c2c(&mut self.product, &mut self.product_inverse)?;
 
         // Normalize results
+        #[allow(clippy::cast_precision_loss)]
         let scale_factor = 1. / (ts_len as Reactivity);
         for z in &mut *self.product_inverse {
             *z *= scale_factor;
@@ -76,6 +77,8 @@ impl Mass {
             .map(|window| mean_stddev(window.iter().map(|r| r.to_maybe_placeholder()), 0));
         let (mean_y, sigma_y) = mean_stddev(query.iter().copied(), 0);
 
+        // We are using this with the z value, it is ok to lose precision
+        #[allow(clippy::cast_precision_loss)]
         let query_len_float = query_len as Reactivity;
         Ok(self
             .product_inverse
@@ -153,6 +156,14 @@ mod tests {
 
     #[test]
     fn test_mass() {
+        const EXPECTED: [Complex<Reactivity>; 5] = [
+            Complex::new(0.676_408_23, 0.),
+            Complex::new(3.430_923_5, 0.),
+            Complex::new(3.430_923_5, 0.),
+            Complex::new(0.000_690_533_95, 0.),
+            Complex::new(1.851_136_1, 0.),
+        ];
+
         let ts = [1., 1., 1., 2., 1., 1., 4., 5.].map(ReactivityWithPlaceholder::from);
         let ts_t = transform_db(&ts).unwrap();
         let query = [2., 1., 1., 4.];
@@ -160,14 +171,6 @@ mod tests {
             .unwrap()
             .run(ts.as_ref(), &ts_t, query.as_ref())
             .unwrap();
-
-        const EXPECTED: [Complex<Reactivity>; 5] = [
-            Complex::new(0.67640823, 0.),
-            Complex::new(3.4309235, 0.),
-            Complex::new(3.4309235, 0.),
-            Complex::new(0.00069053395, 0.),
-            Complex::new(1.8511361, 0.),
-        ];
 
         assert_abs_diff_eq!(&*result, EXPECTED.as_ref(), epsilon = 1e-7);
     }

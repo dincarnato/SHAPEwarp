@@ -114,6 +114,8 @@ fn write_result_to_writer<W: io::Write>(
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
     use crate::{aligner::BaseOrGap, Molecule, QueryResultRange, QueryResultStatus};
 
     use super::*;
@@ -137,18 +139,18 @@ mod test {
             score: 0.,
             pvalue: 0.,
             evalue: 0.,
+            target_bp_support: Option::default(),
+            query_bp_support: Option::default(),
+            mfe_pvalue: Option::default(),
             status: QueryResultStatus::PassInclusionEvalue,
-            alignment: Default::default(),
-            target_bp_support: Default::default(),
-            query_bp_support: Default::default(),
-            mfe_pvalue: Default::default(),
-            dotbracket: Default::default(),
+            alignment: Arc::default(),
+            dotbracket: Option::default(),
         };
 
         let mut writer = vec![];
         write_result_to_writer(&query_result, &db, &query, &mut writer).unwrap();
         let written = String::from_utf8(writer).unwrap();
-        assert_eq!(written, ">16S_Bsubtilis\nGATCCT\n>16S_750\nCTCAGG\n")
+        assert_eq!(written, ">16S_Bsubtilis\nGATCCT\n>16S_750\nCTCAGG\n");
     }
 
     #[test]
@@ -171,18 +173,18 @@ mod test {
             score: 0.,
             pvalue: 0.,
             evalue: 0.,
+            target_bp_support: Option::default(),
+            query_bp_support: Option::default(),
+            mfe_pvalue: Option::default(),
             status: QueryResultStatus::PassInclusionEvalue,
-            alignment: Default::default(),
-            target_bp_support: Default::default(),
-            query_bp_support: Default::default(),
-            mfe_pvalue: Default::default(),
-            dotbracket: Default::default(),
+            alignment: Arc::default(),
+            dotbracket: Option::default(),
         };
 
         let mut writer = vec![];
         write_result_to_writer(&query_result, &db, &query, &mut writer).unwrap();
         let written = String::from_utf8(writer).unwrap();
-        assert_eq!(written, ">16S_Bsubtilis\nGATCCT\n>16S_750\nCUCAGG\n")
+        assert_eq!(written, ">16S_Bsubtilis\nGATCCT\n>16S_750\nCUCAGG\n");
     }
 
     #[test]
@@ -204,12 +206,12 @@ mod test {
             score: 0.,
             pvalue: 0.,
             evalue: 0.,
+            target_bp_support: Option::default(),
+            query_bp_support: Option::default(),
+            mfe_pvalue: Option::default(),
             status: QueryResultStatus::PassInclusionEvalue,
-            alignment: Default::default(),
-            target_bp_support: Default::default(),
-            query_bp_support: Default::default(),
-            mfe_pvalue: Default::default(),
-            dotbracket: Default::default(),
+            alignment: Arc::default(),
+            dotbracket: Option::default(),
         };
 
         assert_eq!(

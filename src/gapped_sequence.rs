@@ -155,7 +155,7 @@ impl StatefulBaseOrGap {
     pub(crate) fn to_base(self) -> Option<Base> {
         match self {
             Self::Base(base) => Some(base),
-            _ => None,
+            Self::Gap => None,
         }
     }
 }
@@ -189,12 +189,7 @@ impl<'a> Iterator for GappedSequenceIter<'a> {
             bases.0.min(alignment.0),
             bases
                 .1
-                .map(|bases| {
-                    alignment
-                        .1
-                        .map(|alignment| bases.max(alignment))
-                        .unwrap_or(bases)
-                })
+                .map(|bases| alignment.1.map_or(bases, |alignment| bases.max(alignment)))
                 .or(alignment.1),
         )
     }

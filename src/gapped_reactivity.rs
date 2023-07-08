@@ -175,12 +175,7 @@ where
             reactivity.0.min(alignment.0),
             reactivity
                 .1
-                .map(|bases| {
-                    alignment
-                        .1
-                        .map(|alignment| bases.max(alignment))
-                        .unwrap_or(bases)
-                })
+                .map(|bases| alignment.1.map_or(bases, |alignment| bases.max(alignment)))
                 .or(alignment.1),
         )
     }

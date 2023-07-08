@@ -38,6 +38,8 @@ where
             if len == 0 {
                 0.
             } else {
+                // It is fine to evaluate the mean
+                #[allow(clippy::cast_precision_loss)]
                 let len_recip = (len as f64).recip();
                 self.data.iter().map(|x| x.as_() * len_recip).sum()
             }
@@ -46,21 +48,20 @@ where
 
     pub fn stddev(&self) -> f64 {
         *self.stddev.get_or_init(|| {
-            self.data
-                .len()
-                .checked_sub(1)
-                .map(|adj_len| {
-                    let denominator = (adj_len as f64).recip();
-                    let mean = self.mean();
-                    let variance: f64 = self
-                        .data
-                        .iter()
-                        .map(|x| (x.as_() - mean).powi(2) * denominator)
-                        .sum();
+            self.data.len().checked_sub(1).map_or(0., |adj_len| {
+                // It is fine to evaluate the variance
+                #[allow(clippy::cast_precision_loss)]
+                let denominator = (adj_len as f64).recip();
 
-                    variance.sqrt()
-                })
-                .unwrap_or(0.)
+                let mean = self.mean();
+                let variance: f64 = self
+                    .data
+                    .iter()
+                    .map(|x| (x.as_() - mean).powi(2) * denominator)
+                    .sum();
+
+                variance.sqrt()
+            })
         })
     }
 }

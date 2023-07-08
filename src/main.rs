@@ -1,3 +1,5 @@
+#![warn(clippy::pedantic)]
+
 mod aligner;
 mod cli;
 mod db_file;
@@ -6,6 +8,7 @@ mod fasta;
 mod gapped_data;
 mod gapped_reactivity;
 mod gapped_sequence;
+mod handle_query_entry;
 mod iter;
 mod mass;
 mod norm_dist;
@@ -16,7 +19,6 @@ mod stockholm;
 mod viennarna;
 
 use std::{
-    cmp::Reverse,
     fmt::{self, Display, Write},
     fs::{self, File},
     io::{self, BufWriter},
@@ -28,7 +30,7 @@ use std::{
     sync::Arc,
 };
 
-use aligner::{trimmed_range, AlignedSequence, Aligner, AlignmentResult, NoOpBehavior};
+use aligner::{trimmed_range, AlignedSequence, Aligner, AlignmentResult};
 use anyhow::{bail, Context};
 use clap::Parser;
 use cli::MinMax;
@@ -41,29 +43,28 @@ use fftw::{
 };
 use fnv::FnvHashMap;
 use gapped_data::GappedData;
-use iter::IterWithRestExt;
 use itertools::Itertools;
 use mass::{ComplexExt, Mass};
-use null_model::*;
+use null_model::make_shuffled_db;
 use num_complex::Complex;
 use num_traits::{cast, float::FloatCore, Float, FromPrimitive, NumAssignRef, NumRef, RefNum};
-use query_aligner::{align_query_to_target_db, QueryAlignResult};
-use rand::thread_rng;
+use query_aligner::QueryAlignResult;
 use rayon::prelude::*;
 use serde::{Deserialize, Deserializer, Serialize};
 use smallvec::SmallVec;
-use statrs::distribution::{self, ContinuousCDF};
 use tabled::{Table, Tabled};
 use viennarna::Structure;
 
 use crate::{
-    aligner::BacktrackBehavior,
     cli::{Cli, ReportAlignment},
     dotbracket::DotBracket,
-    norm_dist::NormDist,
+    handle_query_entry::handle_query_entry,
     viennarna::{FoldCompound, FoldCompoundOptions, ModelDetails},
 };
-pub(crate) use crate::{gapped_reactivity::*, gapped_sequence::*};
+pub(crate) use crate::{
+    gapped_reactivity::{GappedReactivity, GappedReactivityLike},
+    gapped_sequence::{GappedSequence, GappedSequenceLike},
+};
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -72,8 +73,6 @@ fn main() -> anyhow::Result<()> {
         overwrite,
         ref output,
         threads,
-        report_alignment,
-        report_reactivity,
         db_shufflings,
         db_block_size,
         ..
@@ -102,7 +101,6 @@ fn main() -> anyhow::Result<()> {
 
     fs::create_dir_all(output).context("Unable to create output directory")?;
     write_cli_to_file(&cli)?;
-    let results_path = output.join("results.out");
 
     let query_entries_orig = query_file::read_file(&cli.query)?;
     let db_entries_orig = db_file::read_file(&cli.database)?;
@@ -151,21 +149,48 @@ fn main() -> anyhow::Result<()> {
         .expect("unable to write shuffled db to file");
     }
 
+    run(
+        &query_entries,
+        &query_entries_orig,
+        &db_entries,
+        &db_entries_orig,
+        &db_entries_shuffled,
+        &cli,
+    )
+}
+
+fn run(
+    query_entries: &[query_file::Entry],
+    query_entries_orig: &[query_file::Entry],
+    db_entries: &[db_file::Entry],
+    db_entries_orig: &[db_file::Entry],
+    db_entries_shuffled: &[db_file::Entry],
+    cli: &Cli,
+) -> anyhow::Result<()> {
+    let &Cli {
+        ref output,
+        report_alignment,
+        report_reactivity,
+        ..
+    } = cli;
+
+    let results_path = output.join("results.out");
+
     let mut results = query_entries
         .par_iter()
-        .zip(&query_entries_orig)
+        .zip(query_entries_orig)
         .try_fold(
-            || MutableHandlerData::new(&cli),
+            || MutableHandlerData::new(cli),
             |mutable, (query_entry, query_entries_orig)| {
                 handle_query_entry(
                     query_entry,
                     query_entries_orig,
                     HandlerData {
                         shared: SharedHandlerData {
-                            cli: &cli,
-                            db_entries: &db_entries,
-                            db_entries_orig: &db_entries_orig,
-                            db_entries_shuffled: &db_entries_shuffled,
+                            cli,
+                            db_entries,
+                            db_entries_orig,
+                            db_entries_shuffled,
                         },
                         mutable,
                     },
@@ -219,50 +244,24 @@ fn main() -> anyhow::Result<()> {
     }
 
     if let Some(report_alignment) = report_alignment {
-        let alignments_path = output.join("alignments");
-        fs::create_dir_all(&alignments_path)
-            .context("Unable to create alignments output directory")?;
-
-        let mut results = results
-            .iter()
-            .filter(|result| matches!(result.status, QueryResultStatus::PassInclusionEvalue));
-        match report_alignment {
-            ReportAlignment::Fasta => {
-                results
-                    .try_for_each(|result| {
-                        fasta::write_result(
-                            result,
-                            &db_entries_orig,
-                            &query_entries_orig,
-                            &alignments_path,
-                        )
-                    })
-                    .context("Unable to write report alignment in FASTA format")?;
-            }
-            ReportAlignment::Stockholm => {
-                results
-                    .try_for_each(|result| {
-                        stockholm::write_result(
-                            result,
-                            &db_entries_orig,
-                            &query_entries_orig,
-                            &alignments_path,
-                        )
-                    })
-                    .context("Unable to write report alignment in stockholm format")?;
-            }
-        }
+        handle_report_alignment(
+            report_alignment,
+            &results,
+            query_entries_orig,
+            db_entries_orig,
+            cli,
+        )?;
     }
 
     if report_reactivity {
-        write_results_reactivity(&results, &db_entries_orig, &query_entries_orig, output)
+        write_results_reactivity(&results, db_entries_orig, query_entries_orig, output)
             .context("Unable to write result reactivity in JSON format")?;
     }
 
     // Clear screen and position cursor to row 1, column 1
     print!("{esc}[2J{esc}[1;1H", esc = 27 as char);
     if results.is_empty() {
-        println!("No match found with current search settings.")
+        println!("No match found with current search settings.");
     } else {
         use tabled::settings::{object, Disable, Style};
 
@@ -271,7 +270,50 @@ fn main() -> anyhow::Result<()> {
         if cli.alignment_folding_eval_args.eval_align_fold.not() {
             table.with(Disable::column(object::Columns::new(11..14)));
         }
-        println!("{}", table);
+        println!("{table}");
+    }
+
+    Ok(())
+}
+
+fn handle_report_alignment(
+    report_alignment: ReportAlignment,
+    results: &[QueryResult],
+    query_entries_orig: &[query_file::Entry],
+    db_entries_orig: &[db_file::Entry],
+    cli: &Cli,
+) -> anyhow::Result<()> {
+    let alignments_path = cli.output.join("alignments");
+    fs::create_dir_all(&alignments_path).context("Unable to create alignments output directory")?;
+
+    let mut results = results
+        .iter()
+        .filter(|result| matches!(result.status, QueryResultStatus::PassInclusionEvalue));
+    match report_alignment {
+        ReportAlignment::Fasta => {
+            results
+                .try_for_each(|result| {
+                    fasta::write_result(
+                        result,
+                        db_entries_orig,
+                        query_entries_orig,
+                        &alignments_path,
+                    )
+                })
+                .context("Unable to write report alignment in FASTA format")?;
+        }
+        ReportAlignment::Stockholm => {
+            results
+                .try_for_each(|result| {
+                    stockholm::write_result(
+                        result,
+                        db_entries_orig,
+                        query_entries_orig,
+                        &alignments_path,
+                    )
+                })
+                .context("Unable to write report alignment in stockholm format")?;
+        }
     }
 
     Ok(())
@@ -299,12 +341,12 @@ impl<'a> MutableHandlerData<'a> {
     fn new(cli: &'a Cli) -> Self {
         Self {
             aligner: Aligner::new(cli),
-            null_all_scores: Default::default(),
-            null_scores: Default::default(),
-            query_all_results: Default::default(),
-            reusable_query_results: Default::default(),
-            index_to_remove: Default::default(),
-            results: Default::default(),
+            null_all_scores: Vec::default(),
+            null_scores: Vec::default(),
+            query_all_results: Vec::default(),
+            reusable_query_results: Vec::default(),
+            index_to_remove: Vec::default(),
+            results: Vec::default(),
         }
     }
 }
@@ -312,252 +354,6 @@ impl<'a> MutableHandlerData<'a> {
 struct HandlerData<'a> {
     shared: SharedHandlerData<'a>,
     mutable: MutableHandlerData<'a>,
-}
-
-fn handle_query_entry<'a>(
-    query_entry: &'a query_file::Entry,
-    query_entry_orig: &'a query_file::Entry,
-    handler_data: HandlerData<'a>,
-) -> Result<MutableHandlerData<'a>, anyhow::Error> {
-    let HandlerData {
-        shared:
-            SharedHandlerData {
-                cli,
-                db_entries,
-                db_entries_orig,
-                db_entries_shuffled,
-            },
-        mutable:
-            MutableHandlerData {
-                mut aligner,
-                mut null_all_scores,
-                mut null_scores,
-                mut query_all_results,
-                mut reusable_query_results,
-                mut index_to_remove,
-                mut results,
-            },
-    } = handler_data;
-
-    let null_aligner = align_query_to_target_db::<NoOpBehavior>(
-        query_entry,
-        db_entries_shuffled,
-        db_entries_shuffled,
-        &mut null_all_scores,
-        cli,
-    )?;
-    null_scores.clear();
-    null_scores.extend(
-        null_aligner
-            .into_iter(&null_all_scores, &mut aligner)
-            .take(cli.null_hsgs.try_into().unwrap_or(usize::MAX))
-            .map(|query_align_result| query_align_result.score),
-    );
-    let null_distribution = ExtremeDistribution::from_sample(&null_scores);
-
-    let mut query_results = reuse_vec(reusable_query_results);
-    query_results.extend(
-        align_query_to_target_db::<BacktrackBehavior>(
-            query_entry,
-            db_entries,
-            db_entries_orig,
-            &mut query_all_results,
-            cli,
-        )?
-        .into_iter(&query_all_results, &mut aligner)
-        .map(|result| {
-            assert_eq!(
-                result.alignment.query.0.len(),
-                result.alignment.target.0.len()
-            );
-
-            assert_eq!(
-                result.db.end() - result.db.start()
-                    + result
-                        .alignment
-                        .target
-                        .0
-                        .iter()
-                        .filter(|bog| bog.is_base().not())
-                        .count(),
-                result.query.end() - result.query.start()
-                    + result
-                        .alignment
-                        .query
-                        .0
-                        .iter()
-                        .filter(|bog| bog.is_base().not())
-                        .count(),
-            );
-
-            let p_value = null_distribution.p_value(result.score);
-
-            // FIXME: we need to avoid this clone
-            (result.clone(), p_value, 0.)
-        }),
-    );
-
-    let results_len = query_results.len() as f64;
-    query_results.retain_mut(|(_, p_value, e_value)| {
-        *e_value = *p_value * results_len;
-        *e_value <= cli.report_evalue
-    });
-    remove_overlapping_results(&mut query_results, &mut index_to_remove, cli);
-
-    let query = Arc::clone(&query_entry.name);
-    let mut rng = thread_rng();
-    let mut dotbracket_results_buffer = Vec::new();
-    let mut dotbracket_temp_buffer = Vec::new();
-    let mut null_model_energies = Vec::new();
-    let results_iter = query_results
-        .iter()
-        .map(|&(ref result, pvalue, evalue)| {
-            let status = if evalue > cli.report_evalue {
-                QueryResultStatus::NotPass
-            } else if evalue > cli.inclusion_evalue {
-                QueryResultStatus::PassReportEvalue
-            } else {
-                QueryResultStatus::PassInclusionEvalue
-            };
-            (result, pvalue, evalue, status)
-        })
-        .map(|(result, pvalue, evalue, mut status)| {
-            if cli.alignment_folding_eval_args.eval_align_fold.not()
-                || matches!(status, QueryResultStatus::PassInclusionEvalue).not()
-            {
-                return (result, pvalue, evalue, status, None, None);
-            }
-
-            let AlifoldOnResult {
-                dotbracket,
-                ignore,
-                mfe,
-                gapped_data,
-                target_bp_support,
-                query_bp_support,
-            } = alifold_on_result(
-                result,
-                query_entry,
-                query_entry_orig,
-                cli,
-                &mut dotbracket_results_buffer,
-                &mut dotbracket_temp_buffer,
-            );
-
-            if ignore {
-                return (
-                    result,
-                    pvalue,
-                    evalue,
-                    QueryResultStatus::PassReportEvalue,
-                    None,
-                    Some((target_bp_support, query_bp_support)),
-                );
-            }
-
-            let mut indices_buffer = Vec::new();
-            null_model_energies.clear();
-            null_model_energies.extend((0..cli.alignment_folding_eval_args.shufflings).map(|_| {
-                let gapped_data = gapped_data.clone().shuffled(
-                    cli.alignment_folding_eval_args.block_size,
-                    &mut indices_buffer,
-                    &mut rng,
-                );
-
-                let sequences = [gapped_data.target(), gapped_data.query()];
-                let (_, mfe) = alifold_mfe(&sequences, &sequences, cli);
-
-                mfe
-            }));
-            let dist = NormDist::from_sample(&*null_model_energies);
-            let z_score = dist.z_score(mfe);
-
-            let (valid_dist, mfe_pvalue) = (z_score < 0.)
-                .then(|| {
-                    let pvalue = distribution::Normal::new(dist.mean(), dist.stddev())
-                        .expect("stddev is expected to be greater than 0")
-                        .cdf(mfe.into());
-
-                    let significant =
-                        pvalue < cli.alignment_folding_eval_args.align_fold_pvalue.into();
-                    (significant, pvalue)
-                })
-                .unzip();
-            let valid_dist = valid_dist.unwrap_or(false);
-
-            if valid_dist.not() {
-                status = QueryResultStatus::PassReportEvalue;
-            }
-
-            (
-                result,
-                pvalue,
-                evalue,
-                status,
-                mfe_pvalue
-                    .map(|mfe_pvalue| (mfe_pvalue, dotbracket.unwrap().into_sorted().to_owned())),
-                Some((target_bp_support, query_bp_support)),
-            )
-        })
-        .map(
-            |(result, pvalue, evalue, status, mfe_pvalue_dotbracket, bp_support)| {
-                let &QueryAlignResult {
-                    db_entry,
-                    ref db_match,
-                    score,
-                    db: ref db_range,
-                    query: ref query_range,
-                    ref alignment,
-                    ..
-                } = result;
-
-                let db_entry = db_entry.name().to_owned();
-                let query = Arc::clone(&query);
-                let alignment = Arc::clone(alignment);
-
-                let query_seed = QueryResultRange(db_match.query.clone());
-                let db_seed = QueryResultRange(db_match.db.clone());
-                let query_start = *query_range.start();
-                let query_end = *query_range.end();
-                let db_start = *db_range.start();
-                let db_end = *db_range.end();
-
-                let (target_bp_support, query_bp_support) = bp_support.unzip();
-                let (mfe_pvalue, dotbracket) = mfe_pvalue_dotbracket.unzip();
-
-                QueryResult {
-                    query,
-                    db_entry,
-                    query_start,
-                    query_end,
-                    db_start,
-                    db_end,
-                    query_seed,
-                    db_seed,
-                    score,
-                    pvalue,
-                    evalue,
-                    status,
-                    mfe_pvalue,
-                    target_bp_support,
-                    query_bp_support,
-                    alignment,
-                    dotbracket,
-                }
-            },
-        );
-    results.extend(results_iter);
-
-    reusable_query_results = reuse_vec(query_results);
-    Ok(MutableHandlerData {
-        aligner,
-        null_all_scores,
-        null_scores,
-        query_all_results,
-        reusable_query_results,
-        index_to_remove,
-        results,
-    })
 }
 
 // Small hack to reuse vec allocation
@@ -635,22 +431,22 @@ impl QueryResult {
         let query = query.into();
         Self {
             query,
-            db_entry: Default::default(),
+            db_entry: String::default(),
             query_start: Default::default(),
             query_end: Default::default(),
             db_start: Default::default(),
             db_end: Default::default(),
-            query_seed: Default::default(),
-            db_seed: Default::default(),
+            query_seed: QueryResultRange::default(),
+            db_seed: QueryResultRange::default(),
             score: Default::default(),
             pvalue: Default::default(),
             evalue: Default::default(),
-            status: Default::default(),
-            target_bp_support: Default::default(),
-            query_bp_support: Default::default(),
-            mfe_pvalue: Default::default(),
-            alignment: Default::default(),
-            dotbracket: Default::default(),
+            status: QueryResultStatus::default(),
+            target_bp_support: Option::default(),
+            query_bp_support: Option::default(),
+            mfe_pvalue: Option::default(),
+            alignment: Arc::default(),
+            dotbracket: Option::default(),
         }
     }
 }
@@ -681,7 +477,7 @@ impl<'de> Deserialize<'de> for QueryResultRange {
         use serde::de::Error;
 
         let raw = <&str>::deserialize(deserializer)?;
-        let mut split = raw.split('-').map(|x| x.parse());
+        let mut split = raw.split('-').map(str::parse);
         let start = split
             .next()
             .ok_or_else(|| Error::custom("missing start in range"))?
@@ -742,7 +538,7 @@ pub(crate) enum Base {
 
 impl Base {
     fn try_from_nibble(nibble: u8) -> Result<Self, InvalidEncodedBase> {
-        use Base::*;
+        use Base::{A, C, G, N, T};
         Ok(match nibble {
             0 => A,
             1 => C,
@@ -1009,7 +805,13 @@ fn get_matching_kmers(
 
     let max_sequence_distance = kmer_max_seq_dist.map(|dist| dist.to_absolute(kmer_len.into()));
     let max_gc_diff = match_kmer_gc_content.then(|| {
-        kmer_max_gc_diff.unwrap_or_else(|| 0.2676 * (kmer_len as Reactivity * -0.053).exp())
+        kmer_max_gc_diff.unwrap_or_else(|| {
+            // We *want* to eventually lost precision in case Reactivity changes to f64
+            #[allow(clippy::cast_lossless)]
+            let len = kmer_len as Reactivity;
+
+            0.2676 * (len * -0.053).exp()
+        })
     });
 
     let mut mass = Mass::new(db_data.reactivity.len())?;
@@ -1040,11 +842,14 @@ fn get_matching_kmers(
             let (mean_dist, stddev_dist) = mean_stddev(complex_distances.iter().copied(), 1);
             let max_distance = mean_dist.re - stddev_dist.re * 3.;
 
+            // It is ok to lost precision to evaluate the fraction
+            #[allow(clippy::cast_lossless, clippy::cast_precision_loss)]
             let kmer_gc_fraction = max_gc_diff.is_some().then(|| {
                 let gc_count = kmer_sequence
                     .iter()
                     .filter(|&&c| matches!(c, Base::C | Base::G))
                     .count();
+
                 gc_count as Reactivity / kmer_len as Reactivity
             });
 
@@ -1068,27 +873,25 @@ fn get_matching_kmers(
                 kmer_data
                     .into_iter()
                     .filter(move |(_, db_sequence)| {
-                        max_sequence_distance
-                            .map(move |max_sequence_distance| {
-                                {
-                                    u32::try_from(hamming_distance(kmer_sequence, db_sequence))
-                                        .unwrap_or(u32::MAX)
-                                        <= max_sequence_distance
-                                }
-                            })
-                            .unwrap_or(true)
+                        max_sequence_distance.map_or(true, move |max_sequence_distance| {
+                            {
+                                u32::try_from(hamming_distance(kmer_sequence, db_sequence))
+                                    .unwrap_or(u32::MAX)
+                                    <= max_sequence_distance
+                            }
+                        })
                     })
                     .filter(move |(_, db_sequence)| {
-                        max_gc_diff
-                            .map(move |max_gc_diff| {
-                                let gc_count = db_sequence
-                                    .iter()
-                                    .filter(|&&c| matches!(c, Base::C | Base::G))
-                                    .count();
-                                let gc_fraction = gc_count as Reactivity / kmer_len as Reactivity;
-                                Float::abs(gc_fraction - kmer_gc_fraction.unwrap()) <= max_gc_diff
-                            })
-                            .unwrap_or(true)
+                        max_gc_diff.map_or(true, move |max_gc_diff| {
+                            let gc_count = db_sequence
+                                .iter()
+                                .filter(|&&c| matches!(c, Base::C | Base::G))
+                                .count();
+                            // It is ok to evaluate a fraction
+                            #[allow(clippy::cast_precision_loss, clippy::cast_lossless)]
+                            let gc_fraction = gc_count as Reactivity / kmer_len as Reactivity;
+                            Float::abs(gc_fraction - kmer_gc_fraction.unwrap()) <= max_gc_diff
+                        })
                     })
                     .map(move |(sequence_index, _)| [kmer_index, sequence_index]),
             )
@@ -1188,13 +991,13 @@ where
     let (sample_size, sum) = data
         .clone()
         .into_iter()
-        .filter(|x| x.is_finite())
+        .filter(mass::ComplexExt::is_finite)
         .fold((0usize, T::zero()), |(count, sum), x| (count + 1, sum + x));
     let sample_size = T::from(sample_size).unwrap();
     let mean = sum / &sample_size;
     let var_sum: T = data
         .into_iter()
-        .filter(|x| x.is_finite())
+        .filter(mass::ComplexExt::is_finite)
         .map(|x| (x - &mean).powi(2))
         .sum();
     (
@@ -1243,6 +1046,8 @@ fn group_matching_kmers(matching_kmers: &[[usize; 2]], cli: &Cli) -> Vec<MatchRa
     let max_distance = usize::from(max_kmer_dist) + kmer_len;
     let mut groups = Vec::new();
     let mut add_group = |first: &[usize; 2], last: &[usize; 2]| {
+        // False positive, the destination type is a RangeInclusive
+        #[allow(clippy::range_minus_one)]
         let group = MatchRanges {
             query: first[0]..=(last[0] + kmer_len - 1),
             db: first[1]..=(last[1] + kmer_len - 1),
@@ -1319,55 +1124,6 @@ fn write_cli_to_file(cli: &Cli) -> anyhow::Result<()> {
         .context("Unable to write to params.out")?;
 
     Ok(())
-}
-
-fn remove_overlapping_results(
-    results: &mut Vec<(QueryAlignResult<'_, AlignedSequence>, f64, f64)>,
-    indices_buffer: &mut Vec<usize>,
-    cli: &Cli,
-) {
-    let max_align_overlap: f64 = cli.max_align_overlap.into();
-    indices_buffer.clear();
-    results.sort_unstable_by(|(a, _, _), (b, _, _)| {
-        a.db_entry
-            .id
-            .cmp(&b.db_entry.id)
-            .then(a.query.start().cmp(b.query.start()))
-            .then(a.query.end().cmp(b.query.end()).reverse())
-    });
-    results
-        .iter_with_rest()
-        .enumerate()
-        .flat_map(|(a_index, (a, rest))| {
-            let same_db_index = rest.partition_point(|b| a.0.db_entry.id == b.0.db_entry.id);
-            // TODO: check if pre-calculating `a_len` does change anything
-            rest[..same_db_index]
-                .iter()
-                .enumerate()
-                .take_while(|(_, b)| are_overlapping(&a.0.query, &b.0.query, max_align_overlap))
-                .filter(|(_, b)| are_overlapping(&a.0.db, &b.0.db, max_align_overlap))
-                .map(move |(b_offset, b)| (a_index, a_index + b_offset + 1, a.0.score, b.0.score))
-        })
-        .for_each(|(a_index, b_index, a_score, b_score)| {
-            if a_score >= b_score {
-                indices_buffer.push(b_index);
-            } else {
-                indices_buffer.push(a_index);
-            }
-        });
-
-    indices_buffer.sort_unstable_by_key(|&index| Reverse(index));
-
-    if let Some(&first_index) = indices_buffer.first() {
-        results.swap_remove(first_index);
-        indices_buffer
-            .windows(2)
-            .map(|win| [win[0], win[1]])
-            .filter(|[a, b]| a != b)
-            .for_each(|[_, index]| {
-                results.swap_remove(index);
-            });
-    }
 }
 
 fn create_csv_from_writer<W: io::Write>(writer: W) -> csv::Writer<W> {
@@ -1509,10 +1265,7 @@ fn write_results_reactivity(
             (result, data)
         });
 
-    let (result, data) = match iter.next() {
-        Some(result) => result,
-        None => return Ok(()),
-    };
+    let Some((result, data)) = iter.next() else { return Ok(()) };
 
     let mut filename = format!("{}.json", ResultFileFormat::from(result));
     reactivities_path.push(&filename);
@@ -1539,31 +1292,6 @@ enum Molecule {
     Unknown,
 }
 
-#[inline]
-fn overlapping_range<T>(a: &RangeInclusive<T>, b: &RangeInclusive<T>) -> RangeInclusive<T>
-where
-    T: Ord + Clone,
-{
-    let start = a.start().max(b.start()).clone();
-    let end = a.end().min(b.end()).clone();
-    start..=end
-}
-
-#[inline]
-fn are_overlapping(
-    a: &RangeInclusive<usize>,
-    b: &RangeInclusive<usize>,
-    max_align_overlap: f64,
-) -> bool {
-    b.start() < a.end() && {
-        let overlap = overlapping_range(a, b);
-        let a_len = (a.end() + 1 - a.start()) as f64;
-        let b_len = (b.end() + 1 - b.start()) as f64;
-        (overlap.end() + 1).saturating_sub(*overlap.start()) as f64
-            > (a_len.min(b_len)) * max_align_overlap
-    }
-}
-
 #[derive(Debug, Default)]
 struct BasePairsCount {
     pub total: usize,
@@ -1580,13 +1308,13 @@ fn count_base_pairs(
         .get(slice)
         .unwrap()
         .iter()
-        .zip(
-            sequence
-                .get((paired_last - slice_len)..(paired_last + 1))
-                .unwrap()
-                .iter()
-                .rev(),
-        )
+        .zip({
+            // I don't have the implementation for InclusiveRange
+            #[allow(clippy::range_plus_one)]
+            let range = (paired_last - slice_len)..(paired_last + 1);
+
+            sequence.get(range).unwrap().iter().rev()
+        })
         .filter_map(|(a, b)| a.to_base().and_then(|a| b.to_base().map(|b| (a, b))))
         .filter(|(a, b)| {
             matches!(
@@ -1663,8 +1391,11 @@ fn alifold_on_result<'a, 'b>(
     let (dotbracket, ignore, target_bp_support, query_bp_support) =
         match dot_bracket_bp_count_result {
             Ok((dotbracket, bp_count_target, bp_count_query)) => {
+                // It is ok to lose precision to evaluate fractions
+                #[allow(clippy::cast_precision_loss)]
                 let target_canonical_fraction =
                     bp_count_target.canonical as f64 / bp_count_target.total as f64;
+                #[allow(clippy::cast_precision_loss)]
                 let query_canonical_fraction =
                     bp_count_query.canonical as f64 / bp_count_query.total as f64;
 
@@ -1672,6 +1403,8 @@ fn alifold_on_result<'a, 'b>(
                 let ignore = target_canonical_fraction < min_bp_support
                     || query_canonical_fraction < min_bp_support;
 
+                // We don't need the precision *after* the calculation
+                #[allow(clippy::cast_possible_truncation)]
                 (
                     Some(dotbracket),
                     ignore,
@@ -1690,9 +1423,9 @@ fn alifold_on_result<'a, 'b>(
 
     let gapped_data = GappedData::new_unchecked(
         query_sequence,
-        query_reactivity,
+        &query_reactivity,
         target_sequence,
-        target_reactivity,
+        &target_reactivity,
     );
 
     AlifoldOnResult {
@@ -1781,6 +1514,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn base_alignment_score() {
         let cli = dummy_cli();
         let cli = Cli {
@@ -2835,7 +2569,7 @@ mod tests {
         db: [ReactivityWithPlaceholder; DB_SEQUENCE.len()],
     }
 
-    fn dummy_cli() -> Cli {
+    pub(crate) fn dummy_cli() -> Cli {
         Cli::parse_from(["test", "--database", "test", "--query", "test"])
     }
 
@@ -3081,6 +2815,7 @@ mod tests {
     ];
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn seed_score() {
         struct Result {
             db_range: RangeInclusive<usize>,
@@ -3190,183 +2925,6 @@ mod tests {
                 epsilon = 1e-5,
             );
         }
-    }
-
-    #[test]
-    fn remove_overlapping_results_empty() {
-        remove_overlapping_results(&mut Vec::new(), &mut vec![1, 2, 3], &dummy_cli());
-    }
-
-    static EMPTY_ENTRY: db_file::Entry = db_file::Entry {
-        id: String::new(),
-        sequence: Vec::new(),
-        reactivity: Vec::new(),
-    };
-    macro_rules! query_result {
-        ($query:expr, $score:expr) => {
-            (
-                QueryAlignResult {
-                    db_entry: &EMPTY_ENTRY,
-                    db_entry_orig: &EMPTY_ENTRY,
-                    db_match: MatchRanges {
-                        db: 0..=0,
-                        query: 0..=0,
-                    },
-                    score: $score,
-                    db: 0..=10,
-                    query: $query,
-                    alignment: Default::default(),
-                },
-                0.0,
-                0.0,
-            )
-        };
-
-        ($query:expr) => {
-            query_result!($query, 0.)
-        };
-    }
-
-    #[test]
-    fn remove_overlapping_results_non_overlapping() {
-        let mut results = vec![
-            query_result!(0..=4),
-            query_result!(4..=10),
-            query_result!(8..=16),
-        ];
-        let initial_results = results.clone();
-        remove_overlapping_results(&mut results, &mut vec![0, 1, 2, 3, 4], &dummy_cli());
-
-        assert_eq!(results, initial_results);
-    }
-
-    #[test]
-    fn remove_overlapping_results_simple_overlap() {
-        let mut results = vec![query_result!(0..=10, 0.5), query_result!(4..=14, 0.2)];
-        remove_overlapping_results(&mut results, &mut vec![0, 1, 2, 3, 4], &dummy_cli());
-
-        assert_eq!(results, vec![query_result!(0..=10, 0.5)]);
-
-        results = vec![query_result!(0..=10, 0.2), query_result!(4..=14, 0.5)];
-        remove_overlapping_results(&mut results, &mut vec![0, 1, 2, 3, 4], &dummy_cli());
-
-        assert_eq!(results, vec![query_result!(4..=14, 0.5)]);
-    }
-
-    #[test]
-    fn remove_overlapping_results_nested_overlap() {
-        let mut results = vec![query_result!(0..=10, 0.5), query_result!(2..=6, 0.2)];
-        remove_overlapping_results(&mut results, &mut vec![], &dummy_cli());
-
-        assert_eq!(results, vec![query_result!(0..=10, 0.5)]);
-
-        results = vec![query_result!(0..=10, 0.2), query_result!(2..=6, 0.5)];
-        remove_overlapping_results(&mut results, &mut vec![], &dummy_cli());
-
-        assert_eq!(results, vec![query_result!(2..=6, 0.5)]);
-    }
-
-    #[test]
-    fn remove_overlapping_results_chained_overlap() {
-        let mut results = vec![
-            query_result!(0..=5, 0.5),
-            query_result!(2..=8, 0.5),
-            query_result!(4..=10, 0.7),
-            query_result!(6..=12, 0.5),
-            query_result!(8..=14, 0.5),
-            query_result!(10..=16, 0.5),
-        ];
-        remove_overlapping_results(&mut results, &mut vec![], &dummy_cli());
-
-        // The reason for this result is, using the current algorithm:
-        // - the second is removed because this is the current behavior for overlapping sequences
-        //   with the same score;
-        // - the third is kept (it removes the second, again) because it has a higher score;
-        // - all the others are removed "by chaining" (the first has a higher priority in case of
-        //   equal score, but it's been removed by another comparison).
-        assert_eq!(
-            results,
-            vec![query_result!(0..=5, 0.5), query_result!(4..=10, 0.7)]
-        );
-    }
-
-    #[test]
-    fn keep_targets_with_overlapping_results() {
-        let cli = Cli::dummy();
-
-        let targets: Vec<_> = (0..5)
-            .map(|index| db_file::Entry {
-                id: format!("db_{index}"),
-                sequence: vec![Base::A; 100],
-                reactivity: vec![ReactivityWithPlaceholder::from(0.5); 100],
-            })
-            .collect();
-
-        let alignment_result = Arc::new(AlignmentResult {
-            query: AlignedSequence(vec![BaseOrGap::Base; 4]),
-            target: AlignedSequence(vec![BaseOrGap::Base; 4]),
-        });
-        let alignment_result = &alignment_result;
-        let mut results = targets
-            .iter()
-            .enumerate()
-            .flat_map(|(outer_index, db_entry)| {
-                (0..3).map(move |inner_index| {
-                    let result = QueryAlignResult {
-                        db_entry,
-                        db_entry_orig: db_entry,
-                        db_match: MatchRanges {
-                            db: 13..=16,
-                            query: 13..=16,
-                        },
-                        score: 15. + (outer_index as f32) * 3. - (inner_index as f32 * 2.),
-                        db: 10..=20,
-                        query: 10..=20,
-                        alignment: Arc::clone(alignment_result),
-                    };
-
-                    let p_value =
-                        outer_index as f64 / 1000. + 0.01 - ((inner_index + 1) as f64 / 10000.);
-
-                    (result, p_value, p_value)
-                })
-            })
-            .collect();
-
-        let mut indices = vec![];
-        remove_overlapping_results(&mut results, &mut indices, &cli);
-
-        assert_eq!(results.len(), targets.len());
-        let mut scores: Vec<_> = results
-            .into_iter()
-            .map(|(result, _, _)| result.score)
-            .collect();
-        scores.sort_unstable_by(f32::total_cmp);
-        assert_eq!(
-            scores,
-            (0..5)
-                .map(|index| 15. + (index as f32) * 3.)
-                .collect::<Vec<_>>()
-        )
-    }
-
-    #[test]
-    fn keep_targets_with_overlapping_results_different_target() {
-        let mut results = vec![
-            query_result!(0..=4),
-            (
-                QueryAlignResult {
-                    db: 15..=20,
-                    ..(query_result!(0..=4).0)
-                },
-                0.,
-                0.,
-            ),
-        ];
-        let initial_results = results.clone();
-        remove_overlapping_results(&mut results, &mut vec![0, 1, 2, 3, 4], &dummy_cli());
-
-        assert_eq!(results, initial_results);
     }
 
     #[test]

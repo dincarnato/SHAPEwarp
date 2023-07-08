@@ -22,9 +22,9 @@ pub(crate) struct GappedData<'a, T> {
 impl<'a, T> GappedData<'a, T> {
     pub(crate) fn new_unchecked(
         query_sequence: GappedSequence<'a>,
-        query_reactivity: GappedReactivity<'a, T>,
+        query_reactivity: &GappedReactivity<'a, T>,
         target_sequence: GappedSequence<'a>,
-        target_reactivity: GappedReactivity<'a, T>,
+        target_reactivity: &GappedReactivity<'a, T>,
     ) -> Self {
         Self {
             query_sequence: query_sequence.sequence,
@@ -387,7 +387,7 @@ impl Iterator for ShuffledAlignment<'_> {
     fn next(&mut self) -> Option<Self::Item> {
         self.block
             .as_mut()
-            .and_then(|block| block.next())
+            .and_then(Iterator::next)
             .copied()
             .or_else(|| {
                 self.indices.next().map(|&index| {

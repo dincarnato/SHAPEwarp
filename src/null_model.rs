@@ -27,7 +27,12 @@ fn make_shuffled_db_inner<R: Rng>(
         resize_indices(&mut chunk_indices, chunks);
         chunk_indices.shuffle(&mut rng);
 
-        get_shuffled_entry(&chunk_indices, entry, offset, block_size)
+        Some(get_shuffled_entry(
+            &chunk_indices,
+            entry,
+            offset,
+            block_size,
+        ))
     })
     .take(sequences)
     .collect()
@@ -39,7 +44,7 @@ fn get_shuffled_entry(
     entry: &Entry,
     offset: usize,
     block_size: usize,
-) -> Option<Entry> {
+) -> Entry {
     let mut sequence = Vec::with_capacity(entry.sequence.len());
     let mut reactivity = Vec::with_capacity(entry.reactivity.len());
 
@@ -76,11 +81,11 @@ fn get_shuffled_entry(
         }
     }
 
-    Some(Entry {
+    Entry {
         id: entry.id.clone(),
         sequence,
         reactivity,
-    })
+    }
 }
 
 fn resize_indices(indices: &mut Vec<usize>, new_size: usize) {
@@ -150,6 +155,8 @@ impl ExtremeDistribution {
             _ => {}
         }
 
+        // It is fine to evaluate mean and variance\
+        #[allow(clippy::cast_precision_loss)]
         let len = len as f64;
         let len_inv = 1. / len;
         let mean: f64 = sample
@@ -267,8 +274,7 @@ mod tests {
             .copied()
             .collect();
 
-        let shuffled_entry =
-            get_shuffled_entry(&SHUFFLED_INDICES, &entry, OFFSET, BLOCK_SIZE).unwrap();
+        let shuffled_entry = get_shuffled_entry(&SHUFFLED_INDICES, &entry, OFFSET, BLOCK_SIZE);
 
         assert_eq!(shuffled_entry.id, entry.id);
         assert_eq!(shuffled_entry.sequence, expected_sequence);
@@ -314,7 +320,7 @@ mod tests {
             .copied()
             .collect();
 
-        let shuffled_entry = get_shuffled_entry(&SHUFFLED_INDICES, &entry, 0, BLOCK_SIZE).unwrap();
+        let shuffled_entry = get_shuffled_entry(&SHUFFLED_INDICES, &entry, 0, BLOCK_SIZE);
 
         assert_eq!(shuffled_entry.id, entry.id);
         assert_eq!(shuffled_entry.sequence, expected_sequence);
@@ -368,7 +374,7 @@ mod tests {
 
     #[test]
     fn chunk_with_offset() {
-        let data: [u32; 13] = std::array::from_fn(|index| index as u32);
+        let data: [u32; 13] = std::array::from_fn(|index| u32::try_from(index).unwrap());
         assert_eq!(get_chunk_with_offset(0, 3, 5, &data), [0, 1, 2]);
         assert_eq!(get_chunk_with_offset(1, 3, 5, &data), [3, 4, 5, 6, 7]);
         assert_eq!(get_chunk_with_offset(2, 3, 5, &data), [8, 9, 10, 11, 12]);
@@ -379,7 +385,7 @@ mod tests {
 
     #[test]
     fn chunk_without_offset() {
-        let data: [u32; 9] = std::array::from_fn(|index| index as u32);
+        let data: [u32; 9] = std::array::from_fn(|index| u32::try_from(index).unwrap());
         assert_eq!(get_chunk_without_offset(0, 3, &data), [0, 1, 2]);
         assert_eq!(get_chunk_without_offset(1, 3, &data), [3, 4, 5]);
         assert_eq!(get_chunk_without_offset(2, 3, &data), [6, 7, 8]);
@@ -387,8 +393,10 @@ mod tests {
 
     #[test]
     fn extreme_distribution_from_mean_and_variance() {
-        let dist =
-            ExtremeDistribution::from_mean_and_variance(1.508101930862146, 3.224070771022524);
+        let dist = ExtremeDistribution::from_mean_and_variance(
+            1.508_101_930_862_146,
+            3.224_070_771_022_524,
+        );
         assert!((dist.location - 0.7).abs() < 0.00001);
         assert!((dist.scale - 1.4).abs() < 0.00001);
     }
@@ -396,13 +404,13 @@ mod tests {
     #[test]
     fn extreme_distribution_from_sample() {
         const DATA: [f64; 12] = [1., 2., 3., 4., 4.5, 5., 5.5, 6., 7., 8., 9., 10.];
-        const MEAN: f64 = 5.416666666666667;
-        const VARIANCE: f64 = 7.583333333333334;
+        const MEAN: f64 = 5.416_666_666_666_667;
+        const VARIANCE: f64 = 7.583_333_333_333_334;
 
         let dist = ExtremeDistribution::from_sample(&DATA);
         let expected_dist = ExtremeDistribution::from_mean_and_variance(MEAN, VARIANCE);
-        assert!((dist.location - expected_dist.location).abs() < 0.000001);
-        assert!((dist.scale - expected_dist.scale).abs() < 0.000001);
+        assert!((dist.location - expected_dist.location).abs() < 0.000_001);
+        assert!((dist.scale - expected_dist.scale).abs() < 0.000_001);
     }
 
     #[test]
@@ -412,7 +420,7 @@ mod tests {
             scale: 1.4,
         };
 
-        assert!((dist.cdf(4.5f64) - 0.9358947464960762).abs() < 0.00000001);
+        assert!((dist.cdf(4.5f64) - 0.935_894_746_496_076_2).abs() < 0.000_000_01);
     }
 
     #[test]
@@ -422,6 +430,6 @@ mod tests {
             scale: 1.4,
         };
 
-        assert!((dist.p_value(8f64) - 0.0054235557278387025).abs() < 0.00000001);
+        assert!((dist.p_value(8f64) - 0.005_423_555_727_838_702_5).abs() < 0.000_000_01);
     }
 }

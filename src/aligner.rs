@@ -32,7 +32,7 @@ impl Default for Cell {
     fn default() -> Self {
         Self {
             score: Reactivity::NAN,
-            traceback: Default::default(),
+            traceback: Traceback::default(),
             dropoff: Default::default(),
         }
     }
@@ -161,7 +161,7 @@ impl AlignBehavior for BacktrackBehavior {
 
         let target = AlignedSequence(target);
         let query = AlignedSequence(query);
-        AlignmentResult { target, query }
+        AlignmentResult { query, target }
     }
 
     fn merge_upstream_downstream(
@@ -222,7 +222,7 @@ impl<'a> Aligner<'a> {
     pub(crate) fn new(cli: &'a Cli) -> Self {
         Self {
             cli,
-            matrix: Default::default(),
+            matrix: <Array2<_> as Default>::default(),
         }
     }
 
@@ -356,7 +356,7 @@ impl<'a> Aligner<'a> {
         self.align_diagonal_band(query, target)
     }
 
-    #[inline(always)]
+    #[inline]
     fn create_matrix<'b, const FW: bool>(
         &mut self,
         query: &'b EntrySlice<'b, ReactivityWithPlaceholder, FW>,
@@ -402,8 +402,8 @@ impl<'a> Aligner<'a> {
                 }
                 *cell = Cell {
                     score,
-                    dropoff,
                     traceback,
+                    dropoff,
                 };
                 dropoff
             }
@@ -441,34 +441,13 @@ impl<'a> Aligner<'a> {
         EntrySlice<'b, ReactivityWithPlaceholder, FW>: IntoIterator<Item = EntryElement<ReactivityWithPlaceholder>>
             + EntrySliceExt<ReactivityWithPlaceholder>,
     {
-        #[derive(Debug)]
-        struct State {
-            best_score: Reactivity,
-            dropoff_score: Reactivity,
-            best_cell: [usize; 2],
-        }
-
-        impl State {
-            fn new(
-                best_score: Reactivity,
-                best_cell: [usize; 2],
-                alignment_args: &AlignmentArgs,
-            ) -> Self {
-                Self {
-                    best_score,
-                    dropoff_score: best_score * alignment_args.align_max_drop_off_rate,
-                    best_cell,
-                }
-            }
-        }
-
         let rows = target.len() + 1;
         let cols = query.len() + 1;
         let band_size = self.calc_band_size();
         let diag_len = cmp::min(rows, cols);
         let alignment_args = &self.cli.alignment_args;
         let initial_score = self.matrix[(0, 0)].score;
-        let state = State::new(initial_score, [0, 0], alignment_args);
+        let state = AlignerState::new(initial_score, [0, 0], alignment_args);
 
         let calc_alignment_score = if alignment_args.align_score_seq {
             |query: &EntryElement<ReactivityWithPlaceholder>,
@@ -489,119 +468,19 @@ impl<'a> Aligner<'a> {
             }
         };
 
-        let handle_new_score = |cell: &mut Cell,
-                                state: &mut State,
-                                parent_cell: &Cell,
-                                row_index: usize,
-                                col_index: usize| {
-            debug_assert!(cell.score.is_nan().not());
-
-            if cell.score >= state.best_score {
-                *state = State::new(cell.score, [row_index, col_index], alignment_args);
-            } else if cell.score < state.dropoff_score && cell.score > 0. {
-                let dropoff = parent_cell.dropoff.saturating_add(1);
-                if dropoff <= self.cli.alignment_args.align_max_drop_off_bases {
-                    cell.dropoff = dropoff;
-                } else {
-                    cell.score = -Reactivity::INFINITY;
-                    cell.dropoff = 0;
-                }
-            }
-        };
-
         let align_result = (1..(diag_len + band_size)).zip(target).try_fold(
             state,
-            |mut state, (row_index, target)| {
-                let band_range_start = row_index.saturating_sub(band_size).max(1);
-                let band_range_end = (row_index + band_size).min(cols);
-                let (above, mut left, mut band) = self.matrix.multi_slice_mut((
-                    s![row_index - 1, (band_range_start - 1)..band_range_end],
-                    s![row_index, band_range_start - 1],
-                    s![row_index, band_range_start..band_range_end],
-                ));
-
-                let left = left
-                    .first_mut()
-                    .expect("left cell should be always available");
-                if band_range_start > 1 {
-                    left.score = score_from_gap(&above[0], alignment_args);
-                    // left.score = 0.;
-                    left.traceback = Traceback::Up;
-                    handle_new_score(left, &mut state, &above[0], row_index, band_range_start - 1)
-                };
-
-                let left = &*left;
-                let query_band = query.slice((band_range_start - 1)..(band_range_end - 1));
-
-                let (_, mut state, _final_col_index, has_valid_score) = band
-                    .iter_mut()
-                    .zip(query_band)
-                    .zip(above.windows(2).into_iter())
-                    .fold(
-                        (left, state, band_range_start, false),
-                        |(left, mut state, col_index, has_valid_score), ((cell, query), above)| {
-                            let [diag, above] = [&above[0], &above[1]];
-
-                            let alignment_score = calc_alignment_score(&query, &target, self.cli);
-                            let left_score = score_from_gap(left, alignment_args);
-                            let above_score = score_from_gap(above, alignment_args);
-                            let diag_score = diag.score + alignment_score;
-
-                            debug_assert!(left_score.is_nan().not());
-                            debug_assert!(above_score.is_nan().not());
-                            debug_assert!(diag_score.is_nan().not());
-                            let (traceback, score, parent_cell) =
-                                if diag_score >= left_score && diag_score >= above_score {
-                                    (Traceback::Diagonal, diag_score, diag)
-                                } else if left_score >= above_score {
-                                    (Traceback::Left, left_score, left)
-                                } else {
-                                    (Traceback::Up, above_score, above)
-                                };
-
-                            cell.score = score;
-                            cell.traceback = traceback;
-                            handle_new_score(cell, &mut state, parent_cell, row_index, col_index);
-
-                            (cell, state, col_index + 1, has_valid_score | (score > 0.))
-                        },
-                    );
-                debug_assert_eq!(_final_col_index, band_range_end);
-
-                if has_valid_score.not() {
-                    ControlFlow::Break(state.best_cell)
-                } else {
-                    if band_range_end < cols {
-                        let query_base = query.get(band_range_end - 1);
-
-                        let (diag, left, mut cell) = self.matrix.multi_slice_mut((
-                            s![row_index - 1, band_range_end - 1],
-                            s![row_index, band_range_end - 1],
-                            s![row_index, band_range_end],
-                        ));
-                        let diag = diag.first().expect("diag cell should be always available");
-                        let left = left.first().expect("left cell should be always available");
-                        let cell = cell.first_mut().expect("cell should be always available");
-
-                        let alignment_score = calc_alignment_score(&query_base, &target, self.cli);
-                        let left_score = score_from_gap(left, alignment_args);
-                        let diag_score = diag.score + alignment_score;
-
-                        debug_assert!(left_score.is_nan().not());
-                        debug_assert!(diag_score.is_nan().not());
-                        let (traceback, score, parent_cell) = if diag_score >= left_score {
-                            (Traceback::Diagonal, diag_score, diag)
-                        } else {
-                            (Traceback::Left, left_score, left)
-                        };
-
-                        cell.score = score;
-                        cell.traceback = traceback;
-                        handle_new_score(cell, &mut state, parent_cell, row_index, band_range_end);
-                    }
-
-                    ControlFlow::Continue(state)
-                }
+            |state, (row_index, target)| {
+                self.try_fold_result(TryFoldResultArgs {
+                    state,
+                    row_index,
+                    target,
+                    band_size,
+                    cols,
+                    alignment_args,
+                    query,
+                    calc_alignment_score,
+                })
             },
         );
 
@@ -611,6 +490,124 @@ impl<'a> Aligner<'a> {
         }
     }
 
+    fn try_fold_result<'b, F, const FW: bool>(
+        &mut self,
+        args: TryFoldResultArgs<'a, 'b, F, FW>,
+    ) -> ControlFlow<[usize; 2], AlignerState>
+    where
+        EntrySlice<'b, ReactivityWithPlaceholder, FW>: IntoIterator<Item = EntryElement<ReactivityWithPlaceholder>>
+            + EntrySliceExt<ReactivityWithPlaceholder>,
+        F: 'a
+            + Fn(
+                &EntryElement<ReactivityWithPlaceholder>,
+                &EntryElement<ReactivityWithPlaceholder>,
+                &'a Cli,
+            ) -> f32,
+    {
+        let TryFoldResultArgs {
+            mut state,
+            row_index,
+            target,
+            band_size,
+            cols,
+            alignment_args,
+            query,
+            calc_alignment_score,
+        } = args;
+
+        let band_range_start = row_index.saturating_sub(band_size).max(1);
+        let band_range_end = (row_index + band_size).min(cols);
+        let (above, mut left, mut band) = self.matrix.multi_slice_mut((
+            s![row_index - 1, (band_range_start - 1)..band_range_end],
+            s![row_index, band_range_start - 1],
+            s![row_index, band_range_start..band_range_end],
+        ));
+
+        let left = left
+            .first_mut()
+            .expect("left cell should be always available");
+        if band_range_start > 1 {
+            left.score = score_from_gap(above[0], alignment_args);
+            // left.score = 0.;
+            left.traceback = Traceback::Up;
+            handle_new_score(
+                left,
+                &mut state,
+                above[0],
+                row_index,
+                band_range_start - 1,
+                alignment_args,
+            );
+        };
+
+        let left = &*left;
+        let query_band = query.slice((band_range_start - 1)..(band_range_end - 1));
+
+        let (_, mut state, final_col_index, has_valid_score) = band
+            .iter_mut()
+            .zip(query_band)
+            .zip(above.windows(2).into_iter())
+            .fold(
+                (left, state, band_range_start, false),
+                |(left, mut state, col_index, has_valid_score), ((cell, query), above)| {
+                    let [diag, above] = [&above[0], &above[1]];
+
+                    let alignment_score = calc_alignment_score(&query, &target, self.cli);
+                    let left_score = score_from_gap(*left, alignment_args);
+                    let above_score = score_from_gap(*above, alignment_args);
+                    let diag_score = diag.score + alignment_score;
+
+                    debug_assert!(left_score.is_nan().not());
+                    debug_assert!(above_score.is_nan().not());
+                    debug_assert!(diag_score.is_nan().not());
+                    let (traceback, score, parent_cell) =
+                        if diag_score >= left_score && diag_score >= above_score {
+                            (Traceback::Diagonal, diag_score, diag)
+                        } else if left_score >= above_score {
+                            (Traceback::Left, left_score, left)
+                        } else {
+                            (Traceback::Up, above_score, above)
+                        };
+
+                    cell.score = score;
+                    cell.traceback = traceback;
+                    handle_new_score(
+                        cell,
+                        &mut state,
+                        *parent_cell,
+                        row_index,
+                        col_index,
+                        alignment_args,
+                    );
+
+                    (cell, state, col_index + 1, has_valid_score | (score > 0.))
+                },
+            );
+        debug_assert_eq!(final_col_index, band_range_end);
+
+        if has_valid_score.not() {
+            return ControlFlow::Break(state.best_cell);
+        }
+
+        if band_range_end < cols {
+            state = self.handle_last_result_step(
+                band_range_end,
+                TryFoldResultArgs {
+                    state,
+                    row_index,
+                    target,
+                    band_size,
+                    cols,
+                    alignment_args,
+                    query,
+                    calc_alignment_score,
+                },
+            );
+        }
+
+        ControlFlow::Continue(state)
+    }
+
     #[inline]
     fn calc_band_size(&self) -> usize {
         self.calc_band_size_from_rows_cols(self.matrix.nrows(), self.matrix.ncols())
@@ -618,8 +615,132 @@ impl<'a> Aligner<'a> {
 
     fn calc_band_size_from_rows_cols(&self, rows: usize, cols: usize) -> usize {
         let diag_len = cmp::min(rows, cols);
-        ((diag_len as f32 * self.cli.alignment_args.align_len_tolerance).round() as usize)
-            .max(MIN_BAND_SIZE)
+
+        // - we are rounding anyway, it is a best-effort approach
+        // - all the operation is always positive, unlesss align_len_tolerance is negative (which
+        //   should be checked elsewhere)
+        #[allow(
+            clippy::cast_precision_loss,
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss
+        )]
+        let output = ((diag_len as f32 * self.cli.alignment_args.align_len_tolerance).round()
+            as usize)
+            .max(MIN_BAND_SIZE);
+        output
+    }
+
+    fn handle_last_result_step<'b, F, const FW: bool>(
+        &mut self,
+        band_range_end: usize,
+        other: TryFoldResultArgs<'a, 'b, F, FW>,
+    ) -> AlignerState
+    where
+        EntrySlice<'b, ReactivityWithPlaceholder, FW>: IntoIterator<Item = EntryElement<ReactivityWithPlaceholder>>
+            + EntrySliceExt<ReactivityWithPlaceholder>,
+        F: 'a
+            + Fn(
+                &EntryElement<ReactivityWithPlaceholder>,
+                &EntryElement<ReactivityWithPlaceholder>,
+                &'a Cli,
+            ) -> f32,
+    {
+        let TryFoldResultArgs {
+            mut state,
+            row_index,
+            target,
+            alignment_args,
+            query,
+            calc_alignment_score,
+            ..
+        } = other;
+
+        let query_base = query.get(band_range_end - 1);
+
+        let (diag, left, mut cell) = self.matrix.multi_slice_mut((
+            s![row_index - 1, band_range_end - 1],
+            s![row_index, band_range_end - 1],
+            s![row_index, band_range_end],
+        ));
+        let diag = diag.first().expect("diag cell should be always available");
+        let left = left.first().expect("left cell should be always available");
+        let cell = cell.first_mut().expect("cell should be always available");
+
+        let alignment_score = calc_alignment_score(&query_base, &target, self.cli);
+        let left_score = score_from_gap(*left, alignment_args);
+        let diag_score = diag.score + alignment_score;
+
+        debug_assert!(left_score.is_nan().not());
+        debug_assert!(diag_score.is_nan().not());
+        let (traceback, score, parent_cell) = if diag_score >= left_score {
+            (Traceback::Diagonal, diag_score, diag)
+        } else {
+            (Traceback::Left, left_score, left)
+        };
+
+        cell.score = score;
+        cell.traceback = traceback;
+        handle_new_score(
+            cell,
+            &mut state,
+            *parent_cell,
+            row_index,
+            band_range_end,
+            alignment_args,
+        );
+
+        state
+    }
+}
+
+fn handle_new_score(
+    cell: &mut Cell,
+    state: &mut AlignerState,
+    parent_cell: Cell,
+    row_index: usize,
+    col_index: usize,
+    alignment_args: &AlignmentArgs,
+) {
+    debug_assert!(cell.score.is_nan().not());
+
+    if cell.score >= state.best_score {
+        *state = AlignerState::new(cell.score, [row_index, col_index], alignment_args);
+    } else if cell.score < state.dropoff_score && cell.score > 0. {
+        let dropoff = parent_cell.dropoff.saturating_add(1);
+        if dropoff <= alignment_args.align_max_drop_off_bases {
+            cell.dropoff = dropoff;
+        } else {
+            cell.score = -Reactivity::INFINITY;
+            cell.dropoff = 0;
+        }
+    }
+}
+
+struct TryFoldResultArgs<'a, 'b, F: 'a, const FW: bool> {
+    state: AlignerState,
+    row_index: usize,
+    target: EntryElement<ReactivityWithPlaceholder>,
+    band_size: usize,
+    cols: usize,
+    alignment_args: &'a AlignmentArgs,
+    query: &'b EntrySlice<'b, ReactivityWithPlaceholder, FW>,
+    calc_alignment_score: F,
+}
+
+#[derive(Debug)]
+struct AlignerState {
+    best_score: Reactivity,
+    dropoff_score: Reactivity,
+    best_cell: [usize; 2],
+}
+
+impl AlignerState {
+    fn new(best_score: Reactivity, best_cell: [usize; 2], alignment_args: &AlignmentArgs) -> Self {
+        Self {
+            best_score,
+            dropoff_score: best_score * alignment_args.align_max_drop_off_rate,
+            best_cell,
+        }
     }
 }
 
@@ -786,8 +907,8 @@ where
     (entry_slice, range)
 }
 
-fn score_from_gap(cell: &Cell, alignment_args: &AlignmentArgs) -> Reactivity {
-    use Traceback::*;
+fn score_from_gap(cell: Cell, alignment_args: &AlignmentArgs) -> Reactivity {
+    use Traceback::{Diagonal, Left, Up};
 
     let open_gap_score = match cell.traceback {
         Diagonal => alignment_args.align_gap_open_penalty,
@@ -968,7 +1089,7 @@ struct EntryIterBw<'a, T> {
     reactivity: iter::Rev<slice::Iter<'a, T>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct EntryElement<T> {
     base: Base,
     reactivity: T,
@@ -1026,7 +1147,22 @@ pub(crate) fn calc_seed_align_tolerance(
         (query_seed_range.start() - query_range.start).min(*target_seed_range.start());
     let downstream_len = (query_range.end - query_seed_range.end() - 1)
         .min(target_len - target_seed_range.end() - 1);
+
+    // - we are rounding anyway, it is a best-effort approach
+    // - all the operation is always positive, unlesss align_len_tolerance is negative (which
+    //   should be checked elsewhere)
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
     let upstream = upstream_len + (upstream_len as f32 * align_len_tolerance).round() as usize;
+
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
     let downstream =
         downstream_len + (downstream_len as f32 * align_len_tolerance).round() as usize;
 
@@ -1044,8 +1180,7 @@ pub fn trimmed_range<T: ReactivityLike>(reactivities: &[T]) -> Range<usize> {
                 .iter()
                 .copied()
                 .rposition(|x| x.is_nan().not())
-                .map(|x| x + 1)
-                .unwrap_or(new_range.len());
+                .map_or(new_range.len(), |x| x + 1);
             start..(start + end_offset)
         }
         None => 0..(reactivities.len()),
@@ -1064,8 +1199,9 @@ mod tests {
 
     #[test]
     fn fill_borders_small() {
-        let cli = Cli::dummy();
         const SEED_SCORE: Reactivity = 4.5;
+
+        let cli = Cli::dummy();
         let AlignmentArgs {
             align_gap_open_penalty,
             align_gap_ext_penalty,
@@ -1167,7 +1303,7 @@ mod tests {
                     i!(),
                 ],
             ],
-        )
+        );
     }
 
     #[test]
@@ -1186,9 +1322,11 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn fill_borders_large() {
-        let cli = Cli::dummy();
         const SEED_SCORE: Reactivity = 4.5;
+
+        let cli = Cli::dummy();
         let AlignmentArgs {
             align_gap_open_penalty,
             align_gap_ext_penalty,
@@ -1230,9 +1368,10 @@ mod tests {
             .skip(1)
             .take(MIN_BAND_SIZE + 1)
             .fold(0, |mut dropoff, (col, cell)| {
-                let expected_score =
-                    SEED_SCORE + align_gap_open_penalty + align_gap_ext_penalty * col as Reactivity;
-                assert_eq!(cell.score, expected_score,);
+                let expected_score = SEED_SCORE
+                    + align_gap_open_penalty
+                    + align_gap_ext_penalty * Reactivity::from(u16::try_from(col).unwrap());
+                assert_eq!(cell.score, expected_score);
 
                 assert_eq!(cell.traceback, Traceback::Left);
                 if expected_score < SEED_SCORE * align_max_drop_off_rate {
@@ -1261,8 +1400,9 @@ mod tests {
             .skip(1)
             .take(MIN_BAND_SIZE + 1)
             .fold(0, |mut dropoff, (row, cell)| {
-                let expected_score =
-                    SEED_SCORE + align_gap_open_penalty + align_gap_ext_penalty * row as Reactivity;
+                let expected_score = SEED_SCORE
+                    + align_gap_open_penalty
+                    + align_gap_ext_penalty * Reactivity::from(u16::try_from(row).unwrap());
                 assert_eq!(cell.score, expected_score,);
                 assert_eq!(cell.traceback, Traceback::Up);
 
@@ -1315,8 +1455,9 @@ mod tests {
 
     #[test]
     fn align_diagonal_band_downstream() {
-        let cli = Cli::dummy();
         const SEED_SCORE: Reactivity = 93.77;
+
+        let cli = Cli::dummy();
 
         let query_slice = 80..;
         let query = query_file::read_file(Path::new("./test_data/query.txt")).unwrap();
@@ -1395,8 +1536,9 @@ mod tests {
 
     #[test]
     fn align_diagonal_band_upstream() {
-        let cli = Cli::dummy();
         const SEED_SCORE: Reactivity = 81.54;
+
+        let cli = Cli::dummy();
 
         let query_slice = 0..15;
         let query = query_file::read_file(Path::new("./test_data/query.txt")).unwrap();
@@ -1687,16 +1829,28 @@ mod tests {
             Molecule::Dna,
         );
 
-        assert_eq!(get_downstream_alignment_range_no_trim(&query, 2..=5, 4).1, 6..10);
+        assert_eq!(
+            get_downstream_alignment_range_no_trim(&query, 2..=5, 4).1,
+            6..10
+        );
 
         // Everything's fine until one before last base
-        assert_eq!(get_downstream_alignment_range_no_trim(&query, 2..=5, 6).1, 6..12);
+        assert_eq!(
+            get_downstream_alignment_range_no_trim(&query, 2..=5, 6).1,
+            6..12
+        );
 
         // Everything's fine until last base
-        assert_eq!(get_downstream_alignment_range_no_trim(&query, 2..=5, 7).1, 6..13);
+        assert_eq!(
+            get_downstream_alignment_range_no_trim(&query, 2..=5, 7).1,
+            6..13
+        );
 
         // Query range has to be clamped
-        assert_eq!(get_downstream_alignment_range_no_trim(&query, 2..=5, 8).1, 6..13);
+        assert_eq!(
+            get_downstream_alignment_range_no_trim(&query, 2..=5, 8).1,
+            6..13
+        );
     }
 
     #[test]

@@ -125,7 +125,7 @@ where
             break;
         }
 
-        if line.as_bytes().iter().all(|c| c.is_ascii_whitespace()) {
+        if line.as_bytes().iter().all(u8::is_ascii_whitespace) {
             continue;
         }
 
@@ -218,7 +218,7 @@ where
             sequence,
             reactivities,
             molecule,
-        })
+        });
     }
 
     Ok(entries)

@@ -1,3 +1,6 @@
+// We are defining CLI structs
+#![allow(clippy::struct_excessive_bools)]
+
 use clap::{ArgGroup, Args, Parser, ValueEnum};
 use serde::Serialize;
 use std::{fmt, ops::Range, path::PathBuf, str::FromStr};

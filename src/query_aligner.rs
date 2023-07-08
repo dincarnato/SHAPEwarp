@@ -326,8 +326,13 @@ where
     let aligned_query_len = downstream_result.query_index + 1 - upstream_result.query_index;
     debug_assert!(aligned_query_len >= seed_length.get());
 
+    // It is ok to lose precision to evaluate the score
+    #[allow(clippy::cast_precision_loss, clippy::cast_lossless)]
     let score = downstream_result.score as f64
         * ((aligned_query_len as f64).ln() / (query_len as f64).ln());
+
+    // We don't need so much precision on score after the calculation
+    #[allow(clippy::cast_possible_truncation)]
     let score = score as Reactivity;
 
     let query_alignment = Behavior::merge_upstream_downstream(
@@ -433,7 +438,7 @@ mod tests {
         let mut test_db = db_file::Reader::new(Cursor::new(TEST_DB)).unwrap();
         let db_entry_orig = test_db
             .entries()
-            .map(|entry| entry.unwrap())
+            .map(Result::unwrap)
             .find(|entry| entry.id == "16S_Bsubtilis")
             .unwrap();
         let mut db_entry = db_entry_orig.clone();
