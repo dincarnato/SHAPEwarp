@@ -28,7 +28,7 @@ use std::{
     sync::Arc,
 };
 
-use aligner::{AlignedSequence, Aligner, AlignmentResult, NoOpBehavior};
+use aligner::{trimmed_range, AlignedSequence, Aligner, AlignmentResult, NoOpBehavior};
 use anyhow::{bail, Context};
 use clap::Parser;
 use cli::MinMax;
@@ -981,6 +981,8 @@ fn get_matching_kmers(
         ..
     } = cli;
 
+    let trimmed_query_range = trimmed_range(query_reactivity);
+
     let max_sequence_distance = kmer_max_seq_dist.map(|dist| dist.to_absolute(kmer_len.into()));
     let max_gc_diff = match_kmer_gc_content.then(|| {
         kmer_max_gc_diff.unwrap_or_else(|| 0.2676 * (kmer_len as Reactivity * -0.053).exp())
@@ -988,11 +990,15 @@ fn get_matching_kmers(
 
     let mut mass = Mass::new(db_data.reactivity.len())?;
 
+    let kmer_len_usize = kmer_len.into();
+    let last_kmer_index = trimmed_query_range.end.saturating_sub(kmer_len_usize);
     let matches = query_reactivity
-        .windows(kmer_len.into())
-        .zip(query_sequence.windows(kmer_len.into()))
+        .windows(kmer_len_usize)
+        .zip(query_sequence.windows(kmer_len_usize))
         .enumerate()
         .step_by(kmer_offset.into())
+        .skip_while(|&(index, _)| index < trimmed_query_range.start)
+        .take_while(|&(index, _)| index <= last_kmer_index)
         .filter(|(_, (kmer, _))| kmer.iter().any(|&x| x.is_nan()).not())
         .filter(|(_, (kmer, _))| {
             gini_index(ReactivityWithPlaceholder::as_inner_slice(kmer)) >= kmer_min_complexity
