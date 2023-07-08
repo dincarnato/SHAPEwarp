@@ -45,10 +45,6 @@ fn write_result_to_writer<W: io::Write>(
         ..
     } = result;
 
-    let dotbracket = dotbracket
-        .as_ref()
-        .expect("cannot write to stockolm file without a dotbracket");
-
     let db_entry = db_entries
         .iter()
         .find(|entry| entry.name() == db)
@@ -76,16 +72,19 @@ fn write_result_to_writer<W: io::Write>(
 
     let seq_label_align = db.len().max(query.len()).max("#=GC SS_cons".len()) + 1;
 
-    let stockholm = Stockholm::default()
+    let mut stockholm = Stockholm::default()
         .with_identification(ResultFileFormat::from(result))
         .with_author(format!("SHAPEwarp {}", env!("CARGO_PKG_VERSION")))
         .with_empty_line()
         .with_sequence(format!("{db:seq_label_align$}"), db_sequence)
-        .with_sequence(format!("{query:seq_label_align$}"), query_sequence)
-        .with_column_annotation(
+        .with_sequence(format!("{query:seq_label_align$}"), query_sequence);
+
+    if let Some(dotbracket) = dotbracket {
+        stockholm = stockholm.with_column_annotation(
             format!("{:1$}", "SS_cons", seq_label_align - "#=GC ".len()),
             dotbracket,
         );
+    }
 
     stockholm.write(writer)?;
 
