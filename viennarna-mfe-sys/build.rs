@@ -2,7 +2,7 @@ use std::{env, path::PathBuf};
 
 fn main() {
     let vrna = pkg_config::Config::new()
-        .atleast_version("2.4.18")
+        .range_version("2.4.18".."2.6")
         .probe("RNAlib2")
         .unwrap();
 
