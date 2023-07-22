@@ -1,22 +1,14 @@
 // We are defining CLI structs
 #![allow(clippy::struct_excessive_bools)]
 
-use clap::{ArgGroup, Args, Parser, ValueEnum};
+use clap::{Args, Parser, ValueEnum};
 use serde::Serialize;
 use std::{fmt, ops::Range, path::PathBuf, str::FromStr};
 
 use crate::{Distance, Reactivity};
 
 #[derive(Debug, Parser, Serialize)]
-#[clap(
-    author,
-    version,
-    about,
-    group(
-        ArgGroup::new("fold_opt_group").args(&["fold_query", "eval_align_fold"])
-    ),
-    allow_negative_numbers = true,
-)]
+#[clap(author, version, about, allow_negative_numbers = true)]
 #[serde(rename_all = "kebab-case")]
 /// SHAPE-guided RNA structural homology search
 pub struct Cli {
@@ -133,11 +125,11 @@ pub struct Cli {
 #[serde(rename_all = "kebab-case")]
 pub struct FoldingArgs {
     /// Slope for SHAPE reactivities conversion into pseudo-free energy contributions
-    #[clap(long, default_value_t = 1.8, requires = "fold_opt_group")]
+    #[clap(long, default_value_t = 1.8, requires = "eval_align_fold")]
     pub slope: Reactivity,
 
     /// Intercept for SHAPE reactivities conversion into pseudo-free energy contributions
-    #[clap(long, default_value_t = -0.6, requires = "fold_opt_group")]
+    #[clap(long, default_value_t = -0.6, requires = "eval_align_fold")]
     pub intercept: Reactivity,
 
     /// Maximum allowed base-pairing distance
@@ -145,20 +137,20 @@ pub struct FoldingArgs {
         long,
         default_value_t = 600,
         alias = "maxBPspan",
-        requires = "fold_opt_group"
+        requires = "eval_align_fold"
     )]
     pub max_bp_span: u32,
 
     /// Disallows lonely pairs (helices of 1 bp)
-    #[clap(long, alias = "noLonelyPairs", requires = "fold_opt_group")]
+    #[clap(long, alias = "noLonelyPairs", requires = "eval_align_fold")]
     pub no_lonely_pairs: bool,
 
     /// Disallows G:U wobbles at the end of helices
-    #[clap(long, alias = "noClosingGU", requires = "fold_opt_group")]
+    #[clap(long, alias = "noClosingGU", requires = "eval_align_fold")]
     pub no_closing_gu: bool,
 
     /// Folding temperature
-    #[clap(long, default_value_t = 37., requires = "fold_opt_group")]
+    #[clap(long, default_value_t = 37., requires = "eval_align_fold")]
     pub temperature: f32,
 }
 
