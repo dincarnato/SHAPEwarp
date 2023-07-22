@@ -135,7 +135,12 @@ fn main() -> anyhow::Result<()> {
         })
         .transpose()?
         .unwrap_or_else(|| {
-            make_shuffled_db(&db_entries, db_block_size.into(), db_shufflings.into())
+            make_shuffled_db(
+                &db_entries,
+                db_block_size.into(),
+                db_shufflings.into(),
+                cli.db_in_block_shuffle,
+            )
         });
 
     if let Some(shuffled_db_output_path) = cli.dump_shuffled_db.as_deref() {

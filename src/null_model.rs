@@ -6,14 +6,26 @@ use rand::prelude::*;
 use crate::db_file::Entry;
 
 #[inline]
-pub fn make_shuffled_db(db: &[Entry], block_size: usize, shuffle_iterations: usize) -> Vec<Entry> {
-    make_shuffled_db_inner(db, block_size, shuffle_iterations, rand::thread_rng())
+pub fn make_shuffled_db(
+    db: &[Entry],
+    block_size: usize,
+    shuffle_iterations: usize,
+    in_block_shuffle: bool,
+) -> Vec<Entry> {
+    make_shuffled_db_inner(
+        db,
+        block_size,
+        shuffle_iterations,
+        in_block_shuffle,
+        rand::thread_rng(),
+    )
 }
 
 fn make_shuffled_db_inner<R: Rng>(
     db: &[Entry],
     block_size: usize,
     shuffle_iterations: usize,
+    in_block_shuffle: bool,
     mut rng: R,
 ) -> Vec<Entry> {
     let mut chunk_indices = Vec::new();
@@ -32,6 +44,8 @@ fn make_shuffled_db_inner<R: Rng>(
             entry,
             offset,
             block_size,
+            in_block_shuffle,
+            &mut rng,
         ))
     })
     .take(sequences)
@@ -39,44 +53,51 @@ fn make_shuffled_db_inner<R: Rng>(
 }
 
 #[inline]
-fn get_shuffled_entry(
+fn get_shuffled_entry<R>(
     chunk_indices: &[usize],
     entry: &Entry,
     offset: usize,
     block_size: usize,
-) -> Entry {
+    in_block_shuffle: bool,
+    mut rng: R,
+) -> Entry
+where
+    R: Rng,
+{
     let mut sequence = Vec::with_capacity(entry.sequence.len());
     let mut reactivity = Vec::with_capacity(entry.reactivity.len());
 
     match offset {
         0 => {
             for &chunk_index in chunk_indices {
-                sequence.extend_from_slice(get_chunk_without_offset(
-                    chunk_index,
-                    block_size,
-                    &entry.sequence,
-                ));
-                reactivity.extend_from_slice(get_chunk_without_offset(
-                    chunk_index,
-                    block_size,
-                    &entry.reactivity,
-                ));
+                extend_with_shuffle(
+                    &mut sequence,
+                    get_chunk_without_offset(chunk_index, block_size, &entry.sequence),
+                    in_block_shuffle,
+                    &mut rng,
+                );
+                extend_with_shuffle(
+                    &mut reactivity,
+                    get_chunk_without_offset(chunk_index, block_size, &entry.reactivity),
+                    in_block_shuffle,
+                    &mut rng,
+                );
             }
         }
         _ => {
             for &chunk_index in chunk_indices {
-                sequence.extend_from_slice(get_chunk_with_offset(
-                    chunk_index,
-                    offset,
-                    block_size,
-                    &entry.sequence,
-                ));
-                reactivity.extend_from_slice(get_chunk_with_offset(
-                    chunk_index,
-                    offset,
-                    block_size,
-                    &entry.reactivity,
-                ));
+                extend_with_shuffle(
+                    &mut sequence,
+                    get_chunk_with_offset(chunk_index, offset, block_size, &entry.sequence),
+                    in_block_shuffle,
+                    &mut rng,
+                );
+                extend_with_shuffle(
+                    &mut reactivity,
+                    get_chunk_with_offset(chunk_index, offset, block_size, &entry.reactivity),
+                    in_block_shuffle,
+                    &mut rng,
+                );
             }
         }
     }
@@ -224,6 +245,20 @@ fn get_chunk_without_offset<T>(index: usize, block_size: usize, data: &[T]) -> &
         .expect("chunk index out of bound")
 }
 
+fn extend_with_shuffle<T, R>(data: &mut Vec<T>, to_append: &[T], in_block_shuffle: bool, mut rng: R)
+where
+    T: Copy,
+    R: Rng,
+{
+    if in_block_shuffle {
+        let len_before = data.len();
+        data.extend(to_append);
+        data[len_before..].shuffle(&mut rng);
+    } else {
+        data.extend(to_append);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs::File;
@@ -274,7 +309,14 @@ mod tests {
             .copied()
             .collect();
 
-        let shuffled_entry = get_shuffled_entry(&SHUFFLED_INDICES, &entry, OFFSET, BLOCK_SIZE);
+        let shuffled_entry = get_shuffled_entry(
+            &SHUFFLED_INDICES,
+            &entry,
+            OFFSET,
+            BLOCK_SIZE,
+            false,
+            thread_rng(),
+        );
 
         assert_eq!(shuffled_entry.id, entry.id);
         assert_eq!(shuffled_entry.sequence, expected_sequence);
@@ -320,7 +362,14 @@ mod tests {
             .copied()
             .collect();
 
-        let shuffled_entry = get_shuffled_entry(&SHUFFLED_INDICES, &entry, 0, BLOCK_SIZE);
+        let shuffled_entry = get_shuffled_entry(
+            &SHUFFLED_INDICES,
+            &entry,
+            0,
+            BLOCK_SIZE,
+            false,
+            thread_rng(),
+        );
 
         assert_eq!(shuffled_entry.id, entry.id);
         assert_eq!(shuffled_entry.sequence, expected_sequence);
