@@ -1447,6 +1447,11 @@ where
     RR: ReactivityLike,
 {
     let mut model_details = ModelDetails::default();
+    model_details
+        .set_no_lp(cli.folding_args.no_lonely_pairs)
+        .set_no_gu_closure(cli.folding_args.no_closing_gu)
+        .set_temperature(cli.folding_args.temperature.into())
+        .set_ribo(cli.alignment_folding_eval_args.ribosum_scoring);
 
     *model_details.max_bp_span_mut() = cli.folding_args.max_bp_span.try_into().unwrap();
     let mut fold_compound = FoldCompound::new_comparative(

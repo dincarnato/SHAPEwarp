@@ -68,6 +68,26 @@ impl ModelDetails {
     pub fn max_bp_span_mut(&mut self) -> &mut c_int {
         &mut self.0.max_bp_span
     }
+
+    pub fn set_no_lp(&mut self, value: bool) -> &mut Self {
+        self.0.noLP = value.into();
+        self
+    }
+
+    pub fn set_no_gu_closure(&mut self, value: bool) -> &mut Self {
+        self.0.noGUclosure = value.into();
+        self
+    }
+
+    pub fn set_temperature(&mut self, value: f64) -> &mut Self {
+        self.0.temperature = value;
+        self
+    }
+
+    pub fn set_ribo(&mut self, value: bool) -> &mut Self {
+        self.0.ribo = value.into();
+        self
+    }
 }
 
 impl Default for ModelDetails {
