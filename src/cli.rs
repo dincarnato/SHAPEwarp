@@ -95,12 +95,6 @@ pub struct Cli {
     #[clap(long, default_value_t = 0.1, aliases = &["reportEvalue", "repE"], visible_alias = "rep-e")]
     pub report_evalue: f64,
 
-    /// Generates plots of aligned SHAPE reactivity (or probability) profiles
-    ///
-    /// Note: plots are generated only for matches below the inclusion E-value cutoff
-    #[clap(long, alias = "makePlot")]
-    pub make_plot: bool,
-
     /// Reports sequence alignments in the specified format ([f]asta or [s]tockholm)
     ///
     /// Note: alignments are reported only for matches below the inclusion E-value cutoff
@@ -111,13 +105,6 @@ pub struct Cli {
     /// directory, using JSON format
     #[clap(long)]
     pub report_reactivity: bool,
-
-    /// Query SHAPE profile is first used to calculate a base-pairing probability profile, that is
-    /// then used to search into the db
-    ///
-    /// Note: the db must have been generated with the --foldDb option
-    #[clap(long, alias = "foldQuery")]
-    pub fold_query: bool,
 
     #[clap(
         flatten,
@@ -173,40 +160,6 @@ pub struct FoldingArgs {
     /// Folding temperature
     #[clap(long, default_value_t = 37., requires = "fold_opt_group")]
     pub temperature: f32,
-
-    #[clap(
-        flatten,
-        next_help_heading = "Query folding-specific options (require --fold-query)"
-    )]
-    #[serde(flatten)]
-    pub query_folding_args: QueryFoldingArgs,
-}
-
-#[derive(Debug, Args, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub struct QueryFoldingArgs {
-    /// Size (in nt) of the sliding window for partition function calculation
-    #[clap(
-        long,
-        default_value_t = 800,
-        alias = "winSize",
-        requires = "fold_query"
-    )]
-    pub win_size: u32,
-
-    /// Offset (in nt) for partition function window sliding
-    #[clap(long, default_value_t = 200, requires = "fold_query")]
-    pub offset: u32,
-
-    /// Number of bases to trim from both ends of partition function windows to avoid terminal
-    /// biases
-    #[clap(long, default_value_t = 50, alias = "winTrim", requires = "fold_query")]
-    pub win_trim: u32,
-
-    /// SHAPE reactivity is ignored when folding the query
-    #[clap(long = "ignore-react", alias = "ignoreReact", requires = "fold_query")]
-    #[serde(rename = "ignore-react")]
-    pub ignore_reactivity: bool,
 }
 
 #[derive(Debug, Args, Serialize)]
