@@ -197,6 +197,11 @@ impl BaseOrGap {
     pub fn is_base(self) -> bool {
         matches!(self, BaseOrGap::Base)
     }
+
+    #[inline]
+    pub fn is_gap(self) -> bool {
+        matches!(self, BaseOrGap::Gap)
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]

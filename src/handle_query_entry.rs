@@ -242,14 +242,14 @@ impl<'a> QueryResultHandler<'a> {
         result: &QueryAlignResult<AlignedSequence>,
         status: &mut QueryResultStatus,
     ) -> (MfeResult, Option<BpSupport>) {
-        let Self {
-            query_entry,
+        let &mut Self {
+            ref mut query_entry,
             query_entry_orig,
             cli,
-            dotbracket_results_buffer,
-            dotbracket_temp_buffer,
-            null_model_energies,
-            rng,
+            ref mut dotbracket_results_buffer,
+            ref mut dotbracket_temp_buffer,
+            ref mut null_model_energies,
+            ref mut rng,
             ..
         } = self;
 
@@ -286,19 +286,42 @@ impl<'a> QueryResultHandler<'a> {
         }
 
         let mut indices_buffer = Vec::new();
+        let mut block_indices_buffer = cli
+            .alignment_folding_eval_args
+            .in_block_shuffle
+            .then_some(Vec::new());
+
+        let block_size = cli.alignment_folding_eval_args.block_size;
         null_model_energies.clear();
-        null_model_energies.extend((0..cli.alignment_folding_eval_args.shufflings).map(|_| {
-            let gapped_data = gapped_data.clone().shuffled(
-                cli.alignment_folding_eval_args.block_size,
-                &mut indices_buffer,
-                rng,
-            );
+        null_model_energies.extend((0..cli.alignment_folding_eval_args.shufflings).map(
+            move |_| match &mut block_indices_buffer {
+                Some(block_indices_buffer) => {
+                    let gapped_data = gapped_data.clone().shuffled_in_blocks(
+                        block_size,
+                        &mut indices_buffer,
+                        block_indices_buffer,
+                        rng,
+                    );
 
-            let sequences = [gapped_data.target(), gapped_data.query()];
-            let (_, mfe) = alifold_mfe(&sequences, &sequences, cli);
+                    let sequences = [gapped_data.target(), gapped_data.query()];
+                    let (_, mfe) = alifold_mfe(&sequences, &sequences, cli);
 
-            mfe
-        }));
+                    mfe
+                }
+                None => {
+                    let gapped_data = gapped_data.clone().shuffled(
+                        cli.alignment_folding_eval_args.block_size,
+                        &mut indices_buffer,
+                        rng,
+                    );
+
+                    let sequences = [gapped_data.target(), gapped_data.query()];
+                    let (_, mfe) = alifold_mfe(&sequences, &sequences, cli);
+
+                    mfe
+                }
+            },
+        ));
         let dist = NormDist::from_sample(null_model_energies.as_slice());
         let z_score = dist.z_score(mfe);
 
