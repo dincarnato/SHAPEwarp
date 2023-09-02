@@ -36,3 +36,7 @@ tempfile = "3.5.0"
 inherits = "release"
 lto = true
 codegen-units = 1
+
+[build-dependencies]
+pkg-config = "0.3.27"
+semver = "1.0.18"

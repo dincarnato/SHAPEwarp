@@ -13,17 +13,17 @@ use std::{
 
 use bitflags::bitflags;
 use viennarna_mfe_sys::{
-    hc_basepair, hc_nuc, vrna_callback_free_auxdata, vrna_callback_recursion_status,
-    vrna_exp_param_t, vrna_fc_s, vrna_fc_s__bindgen_ty_1, vrna_fc_s__bindgen_ty_1__bindgen_ty_1,
-    vrna_fc_s__bindgen_ty_1__bindgen_ty_2, vrna_fc_type_e, vrna_fc_type_e_VRNA_FC_TYPE_COMPARATIVE,
-    vrna_fc_type_e_VRNA_FC_TYPE_SINGLE, vrna_fold_compound_comparative, vrna_fold_compound_free,
-    vrna_fold_compound_t, vrna_gr_aux_t, vrna_hc_depot_t, vrna_hc_t,
-    vrna_hc_type_e_VRNA_HC_DEFAULT, vrna_hc_type_e_VRNA_HC_WINDOW, vrna_md_set_default, vrna_md_t,
-    vrna_mfe, vrna_msa_t, vrna_mx_mfe_t, vrna_mx_pf_t, vrna_param_t, vrna_sc_bp_storage_t,
-    vrna_sc_init, vrna_sc_s, vrna_sc_set_stack_comparative, vrna_sc_type_e_VRNA_SC_DEFAULT,
-    vrna_sc_type_e_VRNA_SC_WINDOW, vrna_sd_t, vrna_seq_t, vrna_seq_type_e_VRNA_SEQ_DNA,
-    vrna_seq_type_e_VRNA_SEQ_RNA, vrna_seq_type_e_VRNA_SEQ_UNKNOWN, vrna_ud_t, FLT_OR_DBL,
-    VRNA_OPTION_DEFAULT, VRNA_OPTION_MFE, VRNA_OPTION_PF, VRNA_OPTION_WINDOW,
+    hc_basepair, hc_nuc, vrna_exp_param_t, vrna_fc_s, vrna_fc_s__bindgen_ty_1,
+    vrna_fc_s__bindgen_ty_1__bindgen_ty_1, vrna_fc_s__bindgen_ty_1__bindgen_ty_2, vrna_fc_type_e,
+    vrna_fc_type_e_VRNA_FC_TYPE_COMPARATIVE, vrna_fc_type_e_VRNA_FC_TYPE_SINGLE,
+    vrna_fold_compound_comparative, vrna_fold_compound_free, vrna_fold_compound_t, vrna_gr_aux_t,
+    vrna_hc_depot_t, vrna_hc_t, vrna_hc_type_e_VRNA_HC_DEFAULT, vrna_hc_type_e_VRNA_HC_WINDOW,
+    vrna_md_set_default, vrna_md_t, vrna_mfe, vrna_msa_t, vrna_mx_mfe_t, vrna_mx_pf_t,
+    vrna_param_t, vrna_sc_bp_storage_t, vrna_sc_init, vrna_sc_s, vrna_sc_set_stack_comparative,
+    vrna_sc_type_e_VRNA_SC_DEFAULT, vrna_sc_type_e_VRNA_SC_WINDOW, vrna_sd_t, vrna_seq_t,
+    vrna_seq_type_e_VRNA_SEQ_DNA, vrna_seq_type_e_VRNA_SEQ_RNA, vrna_seq_type_e_VRNA_SEQ_UNKNOWN,
+    vrna_ud_t, FLT_OR_DBL, VRNA_OPTION_DEFAULT, VRNA_OPTION_MFE, VRNA_OPTION_PF,
+    VRNA_OPTION_WINDOW,
 };
 
 use crate::{
@@ -32,6 +32,18 @@ use crate::{
 };
 
 pub use self::inner::*;
+
+#[cfg(any(vrna24, vrna25))]
+type AuxdataFree = viennarna_mfe_sys::vrna_callback_free_auxdata;
+
+#[cfg(vrna26)]
+type AuxdataFree = viennarna_mfe_sys::vrna_auxdata_free_f;
+
+#[cfg(any(vrna24, vrna25))]
+type RecursionStatus = viennarna_mfe_sys::vrna_callback_recursion_status;
+
+#[cfg(vrna26)]
+type RecursionStatus = viennarna_mfe_sys::vrna_recursion_status_f;
 
 // Placeholder for core::ffi::c_size_t
 #[allow(non_camel_case_types)]
@@ -72,7 +84,7 @@ impl Default for ModelDetails {
 
 impl PartialEq for ModelDetails {
     fn eq(&self, other: &Self) -> bool {
-        (self.0.temperature == other.0.temperature)
+        let base_check = (self.0.temperature == other.0.temperature)
             & (self.0.betaScale == other.0.betaScale)
             & (self.0.pf_smooth == other.0.pf_smooth)
             & (self.0.dangles == other.0.dangles)
@@ -99,8 +111,23 @@ impl PartialEq for ModelDetails {
             & (self.0.sfact == other.0.sfact)
             & (self.0.rtype == other.0.rtype)
             & (self.0.alias == other.0.alias)
-            & (self.0.pair == other.0.pair)
-            & (self.0.pair_dist == other.0.pair_dist)
+            & (self.0.pair == other.0.pair);
+
+        #[cfg(any(vrna25, vrna26))]
+        let base_check = base_check & (self.0.pair_dist == other.0.pair_dist);
+
+        #[cfg(vrna26)]
+        let base_check = base_check
+            & (self.0.salt == other.0.salt)
+            & (self.0.saltMLLower == other.0.saltMLLower)
+            & (self.0.saltMLUpper == other.0.saltMLUpper)
+            & (self.0.saltDPXInit == other.0.saltDPXInit)
+            & (self.0.saltDPXInitFact == other.0.saltDPXInitFact)
+            & (self.0.helical_rise == other.0.helical_rise)
+            & (self.0.backbone_length == other.0.backbone_length);
+
+        #[allow(clippy::let_and_return)]
+        base_check
     }
 }
 
@@ -296,6 +323,7 @@ impl FoldCompound {
             cutpoint,
             strand_number,
             strand_order,
+            #[cfg(any(vrna25, vrna26))]
             strand_order_uniq,
             strand_start,
             strand_end,
@@ -335,6 +363,7 @@ impl FoldCompound {
             cutpoint,
             strand_number,
             strand_order,
+            #[cfg(any(vrna25, vrna26))]
             strand_order_uniq,
             strand_start,
             strand_end,
@@ -378,6 +407,7 @@ impl FoldCompound {
             cutpoint,
             strand_number,
             strand_order,
+            #[cfg(any(vrna25, vrna26))]
             strand_order_uniq,
             strand_start,
             strand_end,
@@ -417,6 +447,7 @@ impl FoldCompound {
             cutpoint,
             strand_number,
             strand_order,
+            #[cfg(any(vrna25, vrna26))]
             strand_order_uniq,
             strand_start,
             strand_end,
@@ -607,6 +638,7 @@ pub struct FoldCompoundCommon<'a> {
     pub cutpoint: &'a c_int,
     pub strand_number: &'a *mut c_uint,
     pub strand_order: &'a *mut c_uint,
+    #[cfg(any(vrna25, vrna26))]
     pub strand_order_uniq: &'a *mut c_uint,
     pub strand_start: &'a *mut c_uint,
     pub strand_end: &'a *mut c_uint,
@@ -620,9 +652,9 @@ pub struct FoldCompoundCommon<'a> {
     pub exp_params: &'a *mut vrna_exp_param_t,
     pub iindx: &'a *mut c_int,
     pub jindx: &'a *mut c_int,
-    pub stat_cb: &'a vrna_callback_recursion_status,
+    pub stat_cb: &'a RecursionStatus,
     pub auxdata: &'a *mut c_void,
-    pub free_auxdata: &'a vrna_callback_free_auxdata,
+    pub free_auxdata: &'a AuxdataFree,
     pub domains_struc: &'a *mut vrna_sd_t,
     pub domains_up: &'a *mut vrna_ud_t,
     pub aux_grammar: &'a *mut vrna_gr_aux_t,
@@ -663,6 +695,7 @@ impl<'a> FoldCompoundCommon<'a> {
     }
 
     #[inline]
+    #[cfg(any(vrna25, vrna26))]
     pub fn strand_order_uniq(&self) -> Option<&[c_uint]> {
         self.strand_order_uniq.is_null().not().then(|| {
             // Safety:
@@ -973,12 +1006,11 @@ impl<'a> FoldCompoundCommon<'a> {
 
 impl PartialEq for FoldCompoundCommon<'_> {
     fn eq(&self, other: &Self) -> bool {
-        (self.type_ == other.type_)
+        let base_check = (self.type_ == other.type_)
             & (self.length == other.length)
             & (self.cutpoint == other.cutpoint)
             & (self.strand_number() == other.strand_number())
             & (self.strand_order() == other.strand_order())
-            & (self.strand_order_uniq() == other.strand_order_uniq())
             & (self.strand_start() == other.strand_start())
             & (self.strand_end() == other.strand_end())
             & (self.strands == other.strands)
@@ -1001,19 +1033,30 @@ impl PartialEq for FoldCompoundCommon<'_> {
             & (self.mm1() == other.mm1())
             & (self.mm2() == other.mm2())
             & (self.window_size == other.window_size)
-            & (self.ptype_local() == other.ptype_local())
+            & (self.ptype_local() == other.ptype_local());
+
+        #[cfg(any(vrna25, vrna26))]
+        let base_check = base_check & (self.strand_order_uniq() == other.strand_order_uniq());
+
+        base_check
     }
 }
 
 impl fmt::Debug for FoldCompoundCommon<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("FoldCompoundCommon")
+        let mut builder = f.debug_struct("FoldCompoundCommon");
+
+        builder
             .field("type_", &self.type_)
             .field("length", &self.length)
             .field("cutpoint", &self.cutpoint)
             .field("strand_number", &self.strand_number())
-            .field("strand_order", &self.strand_order())
-            .field("strand_order_uniq", &self.strand_order_uniq())
+            .field("strand_order", &self.strand_order());
+
+        #[cfg(any(vrna25, vrna26))]
+        let builder = builder.field("strand_order_uniq", &self.strand_order_uniq());
+
+        builder
             .field("strand_start", &self.strand_start())
             .field("strand_end", &self.strand_end())
             .field("strands", &self.strands)
@@ -1054,6 +1097,7 @@ pub struct FoldCompoundCommonMut<'a> {
     pub cutpoint: &'a mut c_int,
     pub strand_number: &'a mut *mut c_uint,
     pub strand_order: &'a mut *mut c_uint,
+    #[cfg(any(vrna25, vrna26))]
     pub strand_order_uniq: &'a mut *mut c_uint,
     pub strand_start: &'a mut *mut c_uint,
     pub strand_end: &'a mut *mut c_uint,
@@ -1067,9 +1111,9 @@ pub struct FoldCompoundCommonMut<'a> {
     pub exp_params: &'a mut *mut vrna_exp_param_t,
     pub iindx: &'a mut *mut c_int,
     pub jindx: &'a mut *mut c_int,
-    pub stat_cb: &'a mut vrna_callback_recursion_status,
+    pub stat_cb: &'a mut RecursionStatus,
     pub auxdata: &'a mut *mut c_void,
-    pub free_auxdata: &'a mut vrna_callback_free_auxdata,
+    pub free_auxdata: &'a mut AuxdataFree,
     pub domains_struc: &'a mut *mut vrna_sd_t,
     pub domains_up: &'a mut *mut vrna_ud_t,
     pub aux_grammar: &'a mut *mut vrna_gr_aux_t,
@@ -2372,15 +2416,19 @@ impl HardConstraintsDefault<'_> {
             .checked_add(1)
             .unwrap()
             .checked_pow(2)
-            .unwrap()
-            .checked_add(1)
-            .unwrap()
-            .try_into()
             .unwrap();
+
+        #[cfg(any(vrna251, vrna26))]
+        let len = len.checked_add(1).unwrap();
+
+        let len = len.try_into().unwrap();
 
         // Safety:
         // - `mx` is always allocated when type is Default.
-        // - allocated slice length is `(n + 1) * (n + 1) + 1`, where `n` is `fc->length`.
+        // - in vienna <= 5.0, allocated slice length is `(n + 1) * (n + 1)`, where `n` is
+        //   `fc->length`.
+        // - in vienna >= 5.1, allocated slice length is `(n + 1) * (n + 1) + 1`, where `n` is
+        //   `fc->length`.
         unsafe { slice::from_raw_parts(self.mx, len) }
     }
 }
@@ -3932,9 +3980,43 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn miri_vrna_md_t_from_model_details() {
-        let model_details = vrna_md_t {
+    #[cfg(vrna24)]
+    fn default_model_details() -> vrna_md_t {
+        vrna_md_t {
+            temperature: Default::default(),
+            betaScale: Default::default(),
+            pf_smooth: Default::default(),
+            dangles: Default::default(),
+            special_hp: Default::default(),
+            noLP: Default::default(),
+            noGU: Default::default(),
+            noGUclosure: Default::default(),
+            logML: Default::default(),
+            circ: Default::default(),
+            gquad: Default::default(),
+            uniq_ML: Default::default(),
+            energy_set: Default::default(),
+            backtrack: Default::default(),
+            backtrack_type: Default::default(),
+            compute_bpp: Default::default(),
+            nonstandards: [0; 64],
+            max_bp_span: Default::default(),
+            min_loop_size: Default::default(),
+            window_size: Default::default(),
+            oldAliEn: Default::default(),
+            ribo: Default::default(),
+            cv_fact: Default::default(),
+            nc_fact: Default::default(),
+            sfact: Default::default(),
+            rtype: Default::default(),
+            alias: Default::default(),
+            pair: Default::default(),
+        }
+    }
+
+    #[cfg(vrna25)]
+    fn default_model_details() -> vrna_md_t {
+        vrna_md_t {
             temperature: Default::default(),
             betaScale: Default::default(),
             pf_smooth: Default::default(),
@@ -3964,7 +4046,54 @@ mod tests {
             alias: Default::default(),
             pair: Default::default(),
             pair_dist: Default::default(),
-        };
+        }
+    }
+
+    #[cfg(vrna26)]
+    fn default_model_details() -> vrna_md_t {
+        vrna_md_t {
+            temperature: Default::default(),
+            betaScale: Default::default(),
+            pf_smooth: Default::default(),
+            dangles: Default::default(),
+            special_hp: Default::default(),
+            noLP: Default::default(),
+            noGU: Default::default(),
+            noGUclosure: Default::default(),
+            logML: Default::default(),
+            circ: Default::default(),
+            gquad: Default::default(),
+            uniq_ML: Default::default(),
+            energy_set: Default::default(),
+            backtrack: Default::default(),
+            backtrack_type: Default::default(),
+            compute_bpp: Default::default(),
+            nonstandards: [0; 64],
+            max_bp_span: Default::default(),
+            min_loop_size: Default::default(),
+            window_size: Default::default(),
+            oldAliEn: Default::default(),
+            ribo: Default::default(),
+            cv_fact: Default::default(),
+            nc_fact: Default::default(),
+            sfact: Default::default(),
+            rtype: Default::default(),
+            alias: Default::default(),
+            pair: Default::default(),
+            pair_dist: Default::default(),
+            salt: Default::default(),
+            saltMLLower: Default::default(),
+            saltMLUpper: Default::default(),
+            saltDPXInit: Default::default(),
+            saltDPXInitFact: Default::default(),
+            helical_rise: Default::default(),
+            backbone_length: Default::default(),
+        }
+    }
+
+    #[test]
+    fn miri_vrna_md_t_from_model_details() {
+        let model_details = default_model_details();
         let model_details = ModelDetails(model_details);
         let c_ptr = unsafe { vrna_md_t_from_model_details(Some(&model_details)) };
         assert!(c_ptr.is_null().not());
