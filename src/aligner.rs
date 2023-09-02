@@ -546,7 +546,7 @@ impl<'a> Aligner<'a> {
         let (_, mut state, final_col_index, has_valid_score) = band
             .iter_mut()
             .zip(query_band)
-            .zip(above.windows(2).into_iter())
+            .zip(above.windows(2))
             .fold(
                 (left, state, band_range_start, false),
                 |(left, mut state, col_index, has_valid_score), ((cell, query), above)| {

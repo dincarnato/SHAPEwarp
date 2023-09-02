@@ -3435,7 +3435,7 @@ impl Eq for AlignmentA2S<'_> {}
 
 impl fmt::Debug for AlignmentA2S<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_list().entries(self.into_iter()).finish()
+        f.debug_list().entries(self).finish()
     }
 }
 
