@@ -218,7 +218,7 @@ impl FoldCompound {
         // correct behavior is granted by the correct implementation of the underlying library.
         unsafe { vrna_sc_init(self.as_mut()) };
 
-        let (_, comparative) = self.split_mut().into_comparative().unwrap();
+        let (common, comparative) = self.split_mut().into_comparative().unwrap();
 
         #[allow(clippy::cast_precision_loss)]
         let weight = if reactivities.is_empty() {
@@ -250,7 +250,11 @@ impl FoldCompound {
                     )
                     .map(|(_, energy)| energy);
 
-                iter::once(0.).chain(contributions).collect::<Box<_>>()
+                iter::once(0.)
+                    .chain(contributions)
+                    .chain(iter::repeat(0.))
+                    .take(usize::try_from(*common.length).unwrap() + 1)
+                    .collect::<Box<_>>()
             })
             .collect();
         // This is needed because Box<[FLT_OR_DBL]> is a fat pointer, we need something compatible
