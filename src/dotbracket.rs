@@ -1,7 +1,7 @@
 use std::{
     cmp::Ordering,
     fmt::{self, Display},
-    ops::Range,
+    ops::{Not, Range},
     str::FromStr,
 };
 
@@ -46,14 +46,36 @@ where
                 try_fold_from_bytes(partial, index, c, paired_blocks_buffer_ref, working_buffer)
             })?;
 
-        if state.is_none() && working_buffer.is_empty() {
-            Ok(DotBracket {
-                paired_blocks: paired_blocks_buffer,
-                len,
-            })
-        } else {
-            Err(InvalidDotBracket)
+        if working_buffer.is_empty().not() {
+            return Err(InvalidDotBracket);
         }
+
+        if let Some(state) = state {
+            let PartialPairedBlockUnstored {
+                left_start,
+                other:
+                    Some(PartialPairedBlockOther {
+                        left_end,
+                        right_start,
+                    }),
+            } = state
+            else {
+                return Err(InvalidDotBracket);
+            };
+
+            let left = left_start..left_end;
+            let right = right_start..dot_bracket.len();
+            if left.len() != right.len() {
+                return Err(InvalidDotBracket);
+            }
+
+            paired_blocks_buffer_ref.push(PairedBlock { left, right });
+        }
+
+        Ok(DotBracket {
+            paired_blocks: paired_blocks_buffer,
+            len,
+        })
     }
 
     #[inline]
@@ -466,6 +488,42 @@ mod tests {
                     PairedBlock {
                         left: 9..12,
                         right: 15..18,
+                    },
+                ],
+            },
+        );
+    }
+
+    #[test]
+    fn ending_with_state() {
+        let db: DotBracketOwned = "(.((..)))".parse().unwrap();
+        assert_eq!(db.len, 9);
+        assert_eq!(
+            db.paired_blocks,
+            [
+                PairedBlock {
+                    left: 2..4,
+                    right: 6..8,
+                },
+                PairedBlock {
+                    left: 0..1,
+                    right: 8..9,
+                },
+            ],
+        );
+
+        assert_eq!(
+            db.into_sorted(),
+            DotBracket::<_, true> {
+                len: 9,
+                paired_blocks: vec![
+                    PairedBlock {
+                        left: 0..1,
+                        right: 8..9,
+                    },
+                    PairedBlock {
+                        left: 2..4,
+                        right: 6..8,
                     },
                 ],
             },
