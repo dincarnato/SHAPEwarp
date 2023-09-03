@@ -99,35 +99,105 @@ fn try_fold_from_bytes(
     paired_blocks_buffer: &mut Vec<PairedBlock>,
     working_buffer: &mut Vec<PartialPairedBlock>,
 ) -> Result<Option<PartialPairedBlockUnstored>, InvalidDotBracket> {
-    match (c, partial) {
-        (b'(', None) => Ok(Some(PartialPairedBlockUnstored {
+    match c {
+        b'(' => Ok(Some(handle_opening_bracket(
+            partial,
+            index,
+            paired_blocks_buffer,
+            working_buffer,
+        ))),
+
+        b'.' => Ok(handle_dot(
+            partial,
+            index,
+            paired_blocks_buffer,
+            working_buffer,
+        )),
+
+        b')' => handle_closing_bracket(&partial, index, paired_blocks_buffer, working_buffer),
+
+        _ => Err(InvalidDotBracket),
+    }
+}
+
+fn handle_opening_bracket(
+    partial: Option<PartialPairedBlockUnstored>,
+    index: usize,
+    paired_blocks_buffer: &mut Vec<PairedBlock>,
+    working_buffer: &mut Vec<PartialPairedBlock>,
+) -> PartialPairedBlockUnstored {
+    partial.map_or(
+        PartialPairedBlockUnstored {
             left_start: index,
             other: None,
-        })),
+        },
+        |partial| match partial {
+            partial @ PartialPairedBlockUnstored {
+                left_start: _,
+                other: None,
+            } => partial,
 
-        (b'(', partial @ Some(_)) | (b'.', partial @ None) => Ok(partial),
-
-        (b'.', Some(PartialPairedBlockUnstored { left_start, other })) => {
-            match other {
-                Some(PartialPairedBlockOther {
-                    left_end,
-                    right_start,
-                }) => paired_blocks_buffer.push(handle_lr_paired_block(
+            PartialPairedBlockUnstored {
+                left_start,
+                other:
+                    Some(PartialPairedBlockOther {
+                        left_end,
+                        right_start,
+                    }),
+            } => {
+                paired_blocks_buffer.push(handle_lr_paired_block(
                     index,
                     right_start,
                     left_start,
                     left_end,
                     working_buffer,
-                )),
-                None => working_buffer.push(PartialPairedBlock {
-                    left: left_start..index,
-                }),
+                ));
+
+                PartialPairedBlockUnstored {
+                    left_start: index,
+                    other: None,
+                }
             }
+        },
+    )
+}
 
-            Ok(None)
+fn handle_dot(
+    partial: Option<PartialPairedBlockUnstored>,
+    index: usize,
+    paired_blocks_buffer: &mut Vec<PairedBlock>,
+    working_buffer: &mut Vec<PartialPairedBlock>,
+) -> Option<PartialPairedBlockUnstored> {
+    if let Some(partial) = partial {
+        let PartialPairedBlockUnstored { left_start, other } = partial;
+        match other {
+            Some(PartialPairedBlockOther {
+                left_end,
+                right_start,
+            }) => paired_blocks_buffer.push(handle_lr_paired_block(
+                index,
+                right_start,
+                left_start,
+                left_end,
+                working_buffer,
+            )),
+            None => working_buffer.push(PartialPairedBlock {
+                left: left_start..index,
+            }),
         }
+    }
 
-        (b')', None) => {
+    None
+}
+
+fn handle_closing_bracket(
+    partial: &Option<PartialPairedBlockUnstored>,
+    index: usize,
+    paired_blocks_buffer: &mut Vec<PairedBlock>,
+    working_buffer: &mut Vec<PartialPairedBlock>,
+) -> Result<Option<PartialPairedBlockUnstored>, InvalidDotBracket> {
+    match *partial {
+        None => {
             let PartialPairedBlock { left } = working_buffer.pop().ok_or(InvalidDotBracket)?;
             Ok(Some(PartialPairedBlockUnstored {
                 left_start: left.start,
@@ -138,75 +208,47 @@ fn try_fold_from_bytes(
             }))
         }
 
-        (
-            b')',
-            Some(PartialPairedBlockUnstored {
-                left_start,
-                other:
-                    Some(PartialPairedBlockOther {
-                        left_end,
-                        right_start,
-                    }),
-            }),
-        ) if left_end - left_start > index + 1 - right_start => {
-            Ok(Some(PartialPairedBlockUnstored {
+        Some(PartialPairedBlockUnstored {
+            left_start,
+            other:
+                Some(PartialPairedBlockOther {
+                    left_end,
+                    right_start,
+                }),
+        }) => match (left_end - left_start).cmp(&(index + 1 - right_start)) {
+            Ordering::Greater => Ok(Some(PartialPairedBlockUnstored {
                 left_start,
                 other: Some(PartialPairedBlockOther {
                     left_end,
                     right_start,
                 }),
-            }))
-        }
+            })),
 
-        (
-            b')',
-            Some(PartialPairedBlockUnstored {
-                left_start,
-                other:
-                    Some(PartialPairedBlockOther {
-                        left_end,
-                        right_start,
-                    }),
-            }),
-        ) if left_end - left_start == index + 1 - right_start => {
-            let left = left_start..left_end;
-            // Cannot use InclusiveRange here
-            #[allow(clippy::range_plus_one)]
-            let right = right_start..(index + 1);
-            paired_blocks_buffer.push(PairedBlock { left, right });
+            Ordering::Equal => {
+                let left = left_start..left_end;
+                // Cannot use InclusiveRange here
+                #[allow(clippy::range_plus_one)]
+                let right = right_start..(index + 1);
+                paired_blocks_buffer.push(PairedBlock { left, right });
 
-            Ok(None)
-        }
+                Ok(None)
+            }
 
-        (
-            b')',
-            Some(PartialPairedBlockUnstored {
-                left_start,
-                other: None,
-            }),
-        ) => Ok(Some(PartialPairedBlockUnstored {
+            Ordering::Less => {
+                panic!("invalid partial paired blocks status")
+            }
+        },
+
+        Some(PartialPairedBlockUnstored {
+            left_start,
+            other: None,
+        }) => Ok(Some(PartialPairedBlockUnstored {
             left_start,
             other: Some(PartialPairedBlockOther {
                 left_end: index,
                 right_start: index,
             }),
         })),
-
-        (
-            b')',
-            Some(PartialPairedBlockUnstored {
-                left_start,
-                other:
-                    Some(PartialPairedBlockOther {
-                        left_end,
-                        right_start,
-                    }),
-            }),
-        ) if left_end - left_start < index + 1 - right_start => {
-            panic!("invalid partial paired blocks status")
-        }
-
-        _ => Err(InvalidDotBracket),
     }
 }
 
@@ -524,6 +566,58 @@ mod tests {
                     PairedBlock {
                         left: 2..4,
                         right: 6..8,
+                    },
+                ],
+            },
+        );
+    }
+
+    #[test]
+    fn new_loop_after_unstored_block() {
+        let db: DotBracketOwned = "((.((..)))(((..))))".parse().unwrap();
+        assert_eq!(db.len, 19);
+        assert_eq!(
+            db.paired_blocks,
+            [
+                PairedBlock {
+                    left: 3..5,
+                    right: 7..9,
+                },
+                PairedBlock {
+                    left: 1..2,
+                    right: 9..10,
+                },
+                PairedBlock {
+                    left: 10..13,
+                    right: 15..18,
+                },
+                PairedBlock {
+                    left: 0..1,
+                    right: 18..19,
+                },
+            ],
+        );
+
+        assert_eq!(
+            db.into_sorted(),
+            DotBracket::<_, true> {
+                len: 19,
+                paired_blocks: vec![
+                    PairedBlock {
+                        left: 0..1,
+                        right: 18..19,
+                    },
+                    PairedBlock {
+                        left: 1..2,
+                        right: 9..10,
+                    },
+                    PairedBlock {
+                        left: 3..5,
+                        right: 7..9,
+                    },
+                    PairedBlock {
+                        left: 10..13,
+                        right: 15..18,
                     },
                 ],
             },
