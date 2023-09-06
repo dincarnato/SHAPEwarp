@@ -199,13 +199,21 @@ fn handle_closing_bracket(
     match *partial {
         None => {
             let PartialPairedBlock { left } = working_buffer.pop().ok_or(InvalidDotBracket)?;
-            Ok(Some(PartialPairedBlockUnstored {
-                left_start: left.start,
-                other: Some(PartialPairedBlockOther {
-                    left_end: left.end,
-                    right_start: index,
-                }),
-            }))
+            if left.end - left.start == 1 {
+                // Cannot use InclusiveRange here
+                #[allow(clippy::range_plus_one)]
+                let right = index..(index + 1);
+                paired_blocks_buffer.push(PairedBlock { left, right });
+                Ok(None)
+            } else {
+                Ok(Some(PartialPairedBlockUnstored {
+                    left_start: left.start,
+                    other: Some(PartialPairedBlockOther {
+                        left_end: left.end,
+                        right_start: index,
+                    }),
+                }))
+            }
         }
 
         Some(PartialPairedBlockUnstored {
@@ -445,6 +453,25 @@ mod tests {
                 left: 0..4,
                 right: 4..8,
             }],
+        );
+    }
+
+    #[test]
+    fn simple_nested_loop_of_one_bp() {
+        let db: DotBracketOwned = "(.(..))".parse().unwrap();
+        assert_eq!(db.len, 7);
+        assert_eq!(
+            db.paired_blocks,
+            [
+                PairedBlock {
+                    left: 2..3,
+                    right: 5..6,
+                },
+                PairedBlock {
+                    left: 0..1,
+                    right: 6..7,
+                },
+            ],
         );
     }
 
