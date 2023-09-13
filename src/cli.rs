@@ -21,7 +21,15 @@ pub struct Cli {
     ///
     /// Use a file containing the shuffled db instead of the one generated on the fly. You can dump
     /// a shuffled db using `--dump-shuffled-db` in order to reuse it later with this parameter.
-    #[clap(long)]
+    #[clap(
+        long,
+        conflicts_with_all = &[
+            "dump_shuffled_db",
+            "db_shufflings",
+            "db_block_size",
+            "db_in_block_shuffle",
+        ],
+    )]
     #[serde(skip)]
     pub shuffled_db: Option<PathBuf>,
 
