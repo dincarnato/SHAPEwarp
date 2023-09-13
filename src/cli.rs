@@ -98,13 +98,6 @@ pub struct Cli {
     #[clap(long)]
     pub report_reactivity: bool,
 
-    #[clap(
-        flatten,
-        next_help_heading = "Folding options (require --fold-query or --eval-align-fold)"
-    )]
-    #[serde(flatten)]
-    pub folding_args: FoldingArgs,
-
     #[clap(flatten, next_help_heading = "Kmer lookup options")]
     #[serde(flatten)]
     pub kmer_lookup_args: KmerLookupArgs,
@@ -119,39 +112,6 @@ pub struct Cli {
     )]
     #[serde(flatten)]
     pub alignment_folding_eval_args: AlignmentFoldingEvaluationArgs,
-}
-
-#[derive(Debug, Args, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub struct FoldingArgs {
-    /// Slope for SHAPE reactivities conversion into pseudo-free energy contributions
-    #[clap(long, default_value_t = 1.8, requires = "eval_align_fold")]
-    pub slope: Reactivity,
-
-    /// Intercept for SHAPE reactivities conversion into pseudo-free energy contributions
-    #[clap(long, default_value_t = -0.6, requires = "eval_align_fold")]
-    pub intercept: Reactivity,
-
-    /// Maximum allowed base-pairing distance
-    #[clap(
-        long,
-        default_value_t = 600,
-        alias = "maxBPspan",
-        requires = "eval_align_fold"
-    )]
-    pub max_bp_span: u32,
-
-    /// Disallows lonely pairs (helices of 1 bp)
-    #[clap(long, alias = "noLonelyPairs", requires = "eval_align_fold")]
-    pub no_lonely_pairs: bool,
-
-    /// Disallows G:U wobbles at the end of helices
-    #[clap(long, alias = "noClosingGU", requires = "eval_align_fold")]
-    pub no_closing_gu: bool,
-
-    /// Folding temperature
-    #[clap(long, default_value_t = 37., requires = "eval_align_fold")]
-    pub temperature: f32,
 }
 
 #[derive(Debug, Args, Serialize)]
@@ -297,6 +257,35 @@ pub struct AlignmentFoldingEvaluationArgs {
     /// P-value threshold to consider signficant an RNA structure predicted by RNAalifold
     #[clap(long, default_value_t = 0.05, alias = "alignFoldPvalue")]
     pub align_fold_pvalue: f32,
+
+    /// Slope for SHAPE reactivities conversion into pseudo-free energy contributions
+    #[clap(long, default_value_t = 1.8, requires = "eval_align_fold")]
+    pub slope: Reactivity,
+
+    /// Intercept for SHAPE reactivities conversion into pseudo-free energy contributions
+    #[clap(long, default_value_t = -0.6, requires = "eval_align_fold")]
+    pub intercept: Reactivity,
+
+    /// Maximum allowed base-pairing distance
+    #[clap(
+        long,
+        default_value_t = 600,
+        alias = "maxBPspan",
+        requires = "eval_align_fold"
+    )]
+    pub max_bp_span: u32,
+
+    /// Disallows lonely pairs (helices of 1 bp)
+    #[clap(long, alias = "noLonelyPairs", requires = "eval_align_fold")]
+    pub no_lonely_pairs: bool,
+
+    /// Disallows G:U wobbles at the end of helices
+    #[clap(long, alias = "noClosingGU", requires = "eval_align_fold")]
+    pub no_closing_gu: bool,
+
+    /// Folding temperature
+    #[clap(long, default_value_t = 37., requires = "eval_align_fold")]
+    pub temperature: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
