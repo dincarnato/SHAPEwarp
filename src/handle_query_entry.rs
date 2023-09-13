@@ -169,8 +169,8 @@ impl<'a> QueryResultHandler<'a> {
     fn run(
         &mut self,
         result: &QueryAlignResult<AlignedSequence>,
-        pvalue: f64,
-        exp_value: f64,
+        mut pvalue: f64,
+        mut exp_value: f64,
     ) -> QueryResult {
         let mut status = if exp_value > self.cli.report_evalue {
             QueryResultStatus::NotPass
@@ -181,6 +181,11 @@ impl<'a> QueryResultHandler<'a> {
         };
 
         let (mfe_pvalue_dotbracket, bp_support) = self.get_mfe_data(result, &mut status);
+
+        if matches!(mfe_pvalue_dotbracket, MfeResult::Invalid) {
+            pvalue = 1.;
+            exp_value = 1.;
+        }
 
         let &QueryAlignResult {
             db_entry,
@@ -206,9 +211,10 @@ impl<'a> QueryResultHandler<'a> {
         let (target_bp_support, query_bp_support) = bp_support
             .map(|BpSupport { target, query }| (target, query))
             .unzip();
-        let (mfe_pvalue, dotbracket) = mfe_pvalue_dotbracket
-            .map(|MfeResult { pvalue, dotbracket }| (pvalue, dotbracket))
-            .unzip();
+        let (mfe_pvalue, dotbracket) = match mfe_pvalue_dotbracket {
+            MfeResult::Valid { pvalue, dotbracket } => (Some(pvalue), Some(dotbracket)),
+            _ => (None, None),
+        };
 
         QueryResult {
             query,
@@ -235,7 +241,7 @@ impl<'a> QueryResultHandler<'a> {
         &mut self,
         result: &QueryAlignResult<AlignedSequence>,
         status: &mut QueryResultStatus,
-    ) -> (Option<MfeResult>, Option<BpSupport>) {
+    ) -> (MfeResult, Option<BpSupport>) {
         let Self {
             query_entry,
             query_entry_orig,
@@ -250,7 +256,7 @@ impl<'a> QueryResultHandler<'a> {
         if cli.alignment_folding_eval_args.eval_align_fold.not()
             || matches!(status, QueryResultStatus::PassInclusionEvalue).not()
         {
-            return (None, None);
+            return (MfeResult::Unevaluated, None);
         }
 
         let AlifoldOnResult {
@@ -276,7 +282,7 @@ impl<'a> QueryResultHandler<'a> {
 
         if ignore {
             *status = QueryResultStatus::PassReportEvalue;
-            return (None, Some(bp_support));
+            return (MfeResult::Unevaluated, Some(bp_support));
         }
 
         let mut indices_buffer = Vec::new();
@@ -313,7 +319,7 @@ impl<'a> QueryResultHandler<'a> {
         }
 
         (
-            mfe_pvalue.map(|pvalue| MfeResult {
+            mfe_pvalue.map_or(MfeResult::Invalid, |pvalue| MfeResult::Valid {
                 pvalue,
                 dotbracket: dotbracket.unwrap().into_sorted().to_owned(),
             }),
@@ -329,9 +335,13 @@ struct BpSupport {
 }
 
 #[derive(Debug)]
-struct MfeResult {
-    pvalue: f64,
-    dotbracket: DotBracketOwnedSorted,
+enum MfeResult {
+    Unevaluated,
+    Invalid,
+    Valid {
+        pvalue: f64,
+        dotbracket: DotBracketOwnedSorted,
+    },
 }
 
 fn remove_overlapping_results(
