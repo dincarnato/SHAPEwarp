@@ -1265,7 +1265,9 @@ fn write_results_reactivity(
             (result, data)
         });
 
-    let Some((result, data)) = iter.next() else { return Ok(()) };
+    let Some((result, data)) = iter.next() else {
+        return Ok(());
+    };
 
     let mut filename = format!("{}.json", ResultFileFormat::from(result));
     reactivities_path.push(&filename);

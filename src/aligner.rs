@@ -543,11 +543,8 @@ impl<'a> Aligner<'a> {
         let left = &*left;
         let query_band = query.slice((band_range_start - 1)..(band_range_end - 1));
 
-        let (_, mut state, final_col_index, has_valid_score) = band
-            .iter_mut()
-            .zip(query_band)
-            .zip(above.windows(2))
-            .fold(
+        let (_, mut state, final_col_index, has_valid_score) =
+            band.iter_mut().zip(query_band).zip(above.windows(2)).fold(
                 (left, state, band_range_start, false),
                 |(left, mut state, col_index, has_valid_score), ((cell, query), above)| {
                     let [diag, above] = [&above[0], &above[1]];
