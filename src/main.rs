@@ -406,7 +406,7 @@ struct QueryResult {
     #[tabled(display_with = "display_scientific_opt")]
     target_bp_support: Option<f32>,
 
-    #[serde(rename = "TargetBpSupport")]
+    #[serde(rename = "QueryBpSupport")]
     #[tabled(display_with = "display_scientific_opt")]
     query_bp_support: Option<f32>,
 
