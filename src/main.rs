@@ -3032,7 +3032,8 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic = "cannot convert a timine-like residue to an ASCII representation when the \
+        molecule is unknown"]
     fn cannot_display_sequence_for_unknown_molecule() {
         let bases = [Base::C, Base::T, Base::G, Base::A];
         Sequence {
