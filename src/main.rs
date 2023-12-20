@@ -819,6 +819,13 @@ fn get_matching_kmers(
         })
     });
 
+    let query_match_handler = QueryMatchHandler {
+        db_data,
+        max_gc_diff,
+        kmer_len,
+        kmer_max_match_every_nt,
+        max_sequence_distance,
+    };
     let mut mass = Mass::new(db_data.reactivity.len())?;
 
     let kmer_len_usize = kmer_len.into();
@@ -835,76 +842,106 @@ fn get_matching_kmers(
             gini_index(ReactivityWithPlaceholder::as_inner_slice(kmer)) >= kmer_min_complexity
         })
         .map(|(kmer_index, (kmer, kmer_sequence))| {
-            let mut complex_distances = mass.run(
-                db_data.reactivity,
-                &db_data.transformed_reactivity,
-                ReactivityWithPlaceholder::as_inner_slice(kmer),
-            )?;
-            for dist in &mut *complex_distances {
-                *dist = Complex::new(dist.norm(), 0.);
-            }
-
-            let (mean_dist, stddev_dist) = mean_stddev(complex_distances.iter().copied(), 1);
-            let max_distance = mean_dist.re - stddev_dist.re * 3.;
-
-            // It is ok to lost precision to evaluate the fraction
-            #[allow(clippy::cast_lossless, clippy::cast_precision_loss)]
-            let kmer_gc_fraction = max_gc_diff.is_some().then(|| {
-                let gc_count = kmer_sequence
-                    .iter()
-                    .filter(|&&c| matches!(c, Base::C | Base::G))
-                    .count();
-
-                gc_count as Reactivity / kmer_len as Reactivity
-            });
-
-            let mut kmer_data = complex_distances
-                .into_iter()
-                .enumerate()
-                .map(|(index, dist)| (index, dist.re))
-                .zip(db_data.sequence.windows(kmer_len.into()))
-                .filter(move |&((_, dist), _)| dist <= max_distance)
-                .map(|((index, _), db_sequence)| (index, db_sequence))
-                .collect::<Vec<_>>();
-
-            if kmer_data.is_empty().not()
-                && u32::try_from(db_data.reactivity.len() / kmer_data.len()).unwrap_or(u32::MAX)
-                    < kmer_max_match_every_nt
-            {
-                kmer_data.clear();
-            }
-
-            Ok::<_, fftw::error::Error>(
-                kmer_data
-                    .into_iter()
-                    .filter(move |(_, db_sequence)| {
-                        max_sequence_distance.map_or(true, move |max_sequence_distance| {
-                            {
-                                u32::try_from(hamming_distance(kmer_sequence, db_sequence))
-                                    .unwrap_or(u32::MAX)
-                                    <= max_sequence_distance
-                            }
-                        })
-                    })
-                    .filter(move |(_, db_sequence)| {
-                        max_gc_diff.map_or(true, move |max_gc_diff| {
-                            let gc_count = db_sequence
-                                .iter()
-                                .filter(|&&c| matches!(c, Base::C | Base::G))
-                                .count();
-                            // It is ok to evaluate a fraction
-                            #[allow(clippy::cast_precision_loss, clippy::cast_lossless)]
-                            let gc_fraction = gc_count as Reactivity / kmer_len as Reactivity;
-                            Float::abs(gc_fraction - kmer_gc_fraction.unwrap()) <= max_gc_diff
-                        })
-                    })
-                    .map(move |(sequence_index, _)| [kmer_index, sequence_index]),
-            )
+            query_match_handler.run(kmer_index, kmer, kmer_sequence, &mut mass)
         })
         .flatten_ok()
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(matches)
+}
+
+#[derive(Debug)]
+struct QueryMatchHandler<'a> {
+    db_data: &'a DbData<'a>,
+    max_gc_diff: Option<f32>,
+    kmer_len: u16,
+    kmer_max_match_every_nt: u32,
+    max_sequence_distance: Option<u32>,
+}
+
+impl<'a> QueryMatchHandler<'a> {
+    #[inline]
+    fn run(
+        &self,
+        kmer_index: usize,
+        kmer: &[ReactivityWithPlaceholder],
+        kmer_sequence: &'a [Base],
+        mass: &mut Mass,
+    ) -> Result<impl Iterator<Item = [usize; 2]> + Captures<&'a ()>, fftw::error::Error> {
+        let &Self {
+            db_data,
+            max_gc_diff,
+            kmer_len,
+            kmer_max_match_every_nt,
+            max_sequence_distance,
+        } = self;
+
+        let mut complex_distances = mass.run(
+            db_data.reactivity,
+            &db_data.transformed_reactivity,
+            ReactivityWithPlaceholder::as_inner_slice(kmer),
+        )?;
+        for dist in &mut *complex_distances {
+            *dist = Complex::new(dist.norm(), 0.);
+        }
+
+        let (mean_dist, stddev_dist) = mean_stddev(complex_distances.iter().copied(), 1);
+        let max_distance = mean_dist.re - stddev_dist.re * 3.;
+
+        // It is ok to lost precision to evaluate the fraction
+        #[allow(clippy::cast_lossless, clippy::cast_precision_loss)]
+        let kmer_gc_fraction = max_gc_diff.is_some().then(|| {
+            let gc_count = kmer_sequence
+                .iter()
+                .filter(|&&c| matches!(c, Base::C | Base::G))
+                .count();
+
+            gc_count as Reactivity / kmer_len as Reactivity
+        });
+
+        let mut kmer_data = complex_distances
+            .into_iter()
+            .enumerate()
+            .map(|(index, dist)| (index, dist.re))
+            .zip(db_data.sequence.windows(kmer_len.into()))
+            .filter(move |&((_, dist), _)| dist <= max_distance)
+            .map(|((index, _), db_sequence)| (index, db_sequence))
+            .collect::<Vec<_>>();
+
+        if kmer_data.is_empty().not()
+            && u32::try_from(db_data.reactivity.len() / kmer_data.len()).unwrap_or(u32::MAX)
+                < kmer_max_match_every_nt
+        {
+            kmer_data.clear();
+        }
+
+        Ok::<_, fftw::error::Error>(
+            kmer_data
+                .into_iter()
+                .filter(move |(_, db_sequence)| {
+                    max_sequence_distance.map_or(true, move |max_sequence_distance| {
+                        {
+                            u32::try_from(hamming_distance(kmer_sequence, db_sequence))
+                                .unwrap_or(u32::MAX)
+                                <= max_sequence_distance
+                        }
+                    })
+                })
+                .filter(move |(_, db_sequence)| {
+                    max_gc_diff.map_or(true, move |max_gc_diff| {
+                        let gc_count = db_sequence
+                            .iter()
+                            .filter(|&&c| matches!(c, Base::C | Base::G))
+                            .count();
+                        // It is ok to evaluate a fraction
+                        #[allow(clippy::cast_precision_loss, clippy::cast_lossless)]
+                        let gc_fraction = gc_count as Reactivity / kmer_len as Reactivity;
+                        Float::abs(gc_fraction - kmer_gc_fraction.unwrap()) <= max_gc_diff
+                    })
+                })
+                .map(move |(sequence_index, _)| [kmer_index, sequence_index]),
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize)]
@@ -1520,6 +1557,9 @@ fn get_gapped_reactivities<'a>(
         },
     ]
 }
+
+trait Captures<T> {}
+impl<T: ?Sized, U> Captures<U> for T {}
 
 #[cfg(test)]
 mod tests {
