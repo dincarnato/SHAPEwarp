@@ -799,7 +799,7 @@ fn get_matching_kmers(
                 kmer_max_seq_dist,
                 kmer_max_gc_diff,
                 kmer_min_complexity,
-                kmer_max_match_every_nt,
+                mut kmer_max_match_every_nt,
                 match_kmer_gc_content,
                 ..
             },
@@ -818,6 +818,9 @@ fn get_matching_kmers(
             0.2676 * (len * -0.053).exp()
         })
     });
+    if let Ok(db_sequence_len) = u32::try_from(db_data.sequence.len()) {
+        kmer_max_match_every_nt = kmer_max_match_every_nt.min(db_sequence_len);
+    }
 
     let query_match_handler = QueryMatchHandler {
         db_data,
