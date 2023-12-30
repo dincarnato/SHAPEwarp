@@ -169,8 +169,8 @@ impl<'a> QueryResultHandler<'a> {
     fn run(
         &mut self,
         result: &QueryAlignResult<AlignedSequence>,
-        mut pvalue: f64,
-        mut exp_value: f64,
+        pvalue: f64,
+        exp_value: f64,
     ) -> QueryResult {
         let mut status = if exp_value > self.cli.report_evalue {
             QueryResultStatus::NotPass
@@ -181,11 +181,6 @@ impl<'a> QueryResultHandler<'a> {
         };
 
         let (mfe_pvalue_dotbracket, bp_support) = self.get_mfe_data(result, &mut status);
-
-        if matches!(mfe_pvalue_dotbracket, MfeResult::Invalid) {
-            pvalue = 1.;
-            exp_value = 1.;
-        }
 
         let &QueryAlignResult {
             db_entry,
