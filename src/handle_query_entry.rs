@@ -320,29 +320,18 @@ impl<'a> QueryResultHandler<'a> {
         let dist = NormDist::from_sample(null_model_energies.as_slice());
         let z_score = dist.z_score(mfe);
 
-        let (valid_dist, mfe_pvalue) = (z_score < 0.)
+        let mfe_pvalue = (z_score < 0.)
             .then(|| {
-                let pvalue = distribution::Normal::new(dist.mean(), dist.stddev())
+                distribution::Normal::new(dist.mean(), dist.stddev())
                     .expect("stddev is expected to be greater than 0")
-                    .cdf(mfe.into());
-
-                let significant = pvalue < cli.alignment_folding_eval_args.align_fold_pvalue.into();
-                (significant, pvalue)
+                    .cdf(mfe.into())
             })
-            .unzip();
-        let valid_dist = valid_dist.unwrap_or(false);
-
-        if valid_dist.not() {
-            *status = QueryResultStatus::PassReportEvalue;
-        }
-
-        (
-            mfe_pvalue.map_or(MfeResult::Invalid, |pvalue| MfeResult::Valid {
+            .map_or(MfeResult::Invalid, |pvalue| MfeResult::Valid {
                 pvalue,
                 dotbracket: dotbracket.unwrap().into_sorted().to_owned(),
-            }),
-            Some(bp_support),
-        )
+            });
+
+        (mfe_pvalue, Some(bp_support))
     }
 }
 

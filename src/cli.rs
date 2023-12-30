@@ -262,10 +262,6 @@ pub struct AlignmentFoldingEvaluationArgs {
     #[clap(long, alias = "ribosumScoring")]
     pub ribosum_scoring: bool,
 
-    /// P-value threshold to consider signficant an RNA structure predicted by RNAalifold
-    #[clap(long, default_value_t = 0.05, alias = "alignFoldPvalue")]
-    pub align_fold_pvalue: f32,
-
     /// Slope for SHAPE reactivities conversion into pseudo-free energy contributions
     #[clap(long, default_value_t = 1.8, requires = "eval_align_fold")]
     pub slope: Reactivity,
