@@ -207,8 +207,10 @@ impl<'a> QueryResultHandler<'a> {
             .map(|BpSupport { target, query }| (target, query))
             .unzip();
         let (mfe_pvalue, dotbracket) = match mfe_pvalue_dotbracket {
-            MfeResult::Valid { pvalue, dotbracket } => (Some(pvalue), Some(dotbracket)),
-            _ => (None, None),
+            MfeResult::Evaluated { pvalue, dotbracket } => {
+                (Some(pvalue.unwrap_or(1.)), Some(dotbracket))
+            }
+            MfeResult::Unevaluated => (None, None),
         };
 
         QueryResult {
@@ -320,18 +322,17 @@ impl<'a> QueryResultHandler<'a> {
         let dist = NormDist::from_sample(null_model_energies.as_slice());
         let z_score = dist.z_score(mfe);
 
-        let mfe_pvalue = (z_score < 0.)
-            .then(|| {
-                distribution::Normal::new(dist.mean(), dist.stddev())
-                    .expect("stddev is expected to be greater than 0")
-                    .cdf(mfe.into())
-            })
-            .map_or(MfeResult::Invalid, |pvalue| MfeResult::Valid {
-                pvalue,
-                dotbracket: dotbracket.unwrap().into_sorted().to_owned(),
-            });
+        let mfe_pvalue = (z_score < 0.).then(|| {
+            distribution::Normal::new(dist.mean(), dist.stddev())
+                .expect("stddev is expected to be greater than 0")
+                .cdf(mfe.into())
+        });
+        let mfe_result = MfeResult::Evaluated {
+            pvalue: mfe_pvalue,
+            dotbracket: dotbracket.unwrap().into_sorted().to_owned(),
+        };
 
-        (mfe_pvalue, Some(bp_support))
+        (mfe_result, Some(bp_support))
     }
 }
 
@@ -344,9 +345,8 @@ struct BpSupport {
 #[derive(Debug)]
 enum MfeResult {
     Unevaluated,
-    Invalid,
-    Valid {
-        pvalue: f64,
+    Evaluated {
+        pvalue: Option<f64>,
         dotbracket: DotBracketOwnedSorted,
     },
 }
