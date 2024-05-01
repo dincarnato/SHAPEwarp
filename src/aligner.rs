@@ -1934,7 +1934,7 @@ mod tests {
         let target = db_file::Entry {
             id: "target".to_string(),
             sequence: vec![Base::A; 20],
-            reactivity: vec![ReactivityWithPlaceholder::try_from(1.).unwrap(); 20],
+            reactivity: vec![ReactivityWithPlaceholder::from(1.); 20],
         };
 
         // All ranges have to be clamped
@@ -2072,7 +2072,7 @@ mod tests {
         let target = db_file::Entry {
             id: "target".to_string(),
             sequence: vec![Base::A; 20],
-            reactivity: vec![ReactivityWithPlaceholder::try_from(1.).unwrap(); 20],
+            reactivity: vec![ReactivityWithPlaceholder::from(1.); 20],
         };
 
         // All ranges have to be clamped

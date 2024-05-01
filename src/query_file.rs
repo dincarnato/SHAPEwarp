@@ -330,9 +330,10 @@ mod tests {
         const CONTENT: &str = include_str!("../test_data/query_invalid_base.txt");
         let err = read_file_content(Cursor::new(CONTENT)).unwrap_err();
 
-        match err {
-            Error::InvalidSequenceBase(err) => assert_eq!(*err, RowColumn { row: 6, column: 3 }),
-            _ => panic!(),
+        if let Error::InvalidSequenceBase(err) = err {
+            assert_eq!(*err, RowColumn { row: 6, column: 3 });
+        } else {
+            panic!()
         }
     }
 
@@ -341,9 +342,10 @@ mod tests {
         const CONTENT: &str = include_str!("../test_data/query_invalid_reactivity.txt");
         let err = read_file_content(Cursor::new(CONTENT)).unwrap_err();
 
-        match err {
-            Error::InvalidReactivity(err) => assert_eq!(*err, RowColumn { row: 7, column: 11 }),
-            _ => panic!(),
+        if let Error::InvalidReactivity(err) = err {
+            assert_eq!(*err, RowColumn { row: 7, column: 11 });
+        } else {
+            panic!()
         }
     }
 
@@ -352,16 +354,17 @@ mod tests {
         const CONTENT: &str = include_str!("../test_data/query_invalid_lengths.txt");
         let err = read_file_content(Cursor::new(CONTENT)).unwrap_err();
 
-        match err {
-            Error::UnmatchedLengths(err) => assert_eq!(
+        if let Error::UnmatchedLengths(err) = err {
+            assert_eq!(
                 *err,
                 UnmatchedLengths {
                     sequence: 6,
                     reactivities: 5,
                     line: 5,
                 }
-            ),
-            _ => panic!(),
+            );
+        } else {
+            panic!()
         }
     }
 
