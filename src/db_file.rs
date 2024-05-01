@@ -16,7 +16,7 @@ const VERSION: u16 = 1;
 
 #[derive(Debug)]
 pub struct Reader<R> {
-    reader: R,
+    inner: R,
     _db_len: u64,
     _version: u16,
     end_offset: u64,
@@ -40,7 +40,7 @@ where
         let db_len = u64::from_le_bytes(end_buf[0..8].try_into().unwrap());
         let version = u16::from_le_bytes(end_buf[8..10].try_into().unwrap());
         Ok(Self {
-            reader,
+            inner: reader,
             _db_len: db_len,
             _version: version,
             end_offset,
@@ -49,13 +49,13 @@ where
 
     pub fn entries(&mut self) -> EntryIter<R> {
         let &mut Self {
-            ref mut reader,
+            ref mut inner,
             end_offset,
             ..
         } = self;
 
         EntryIter {
-            reader,
+            reader: inner,
             end_offset,
             offset: 0,
         }
