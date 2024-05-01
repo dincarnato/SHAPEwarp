@@ -176,6 +176,7 @@ pub struct KmerLookupArgs {
 
 #[derive(Debug, Args, Serialize)]
 #[serde(rename_all = "kebab-case")]
+#[allow(clippy::struct_field_names)]
 pub struct AlignmentArgs {
     /// Minimum and maximum score reactivity differences below 0.5 will be mapped to
     #[clap(long, default_value_t = MinMax (-0.5..2.), alias = "alignMatchScore", allow_hyphen_values = true)]
