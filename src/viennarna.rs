@@ -62,7 +62,7 @@ impl ModelDetails {
     pub fn from_ref(model_details_raw: &vrna_md_t) -> &Self {
         // Safety
         // - `ModelDetails` is transparent over `vrna_md_t`.
-        unsafe { &*(model_details_raw as *const vrna_md_t).cast() }
+        unsafe { &*ptr::from_ref(model_details_raw).cast() }
     }
 
     pub fn max_bp_span_mut(&mut self) -> &mut c_int {
@@ -1881,7 +1881,7 @@ impl<T> OptionalSliceElement<T> {
 pub struct EnergyUnpairedProbabilities<'a, T> {
     /// # Note
     ///
-    /// The first and the last elements point to just a c_int, the others point to allocated arrays
+    /// The first and the last elements point to just a `c_int`, the others point to allocated arrays
     /// of size `len - index + 2` (len == fc.length). Moreover, these can be null pointers.
     data: &'a [*mut T],
     len: usize,
@@ -3442,7 +3442,7 @@ impl Alignment {
             let a2s = unsafe {
                 let slice = slice::from_raw_parts(self.0.a2s, usize::try_from(self.n_seq).unwrap());
                 assert!(slice.iter().all(|ptr| ptr.is_null().not()));
-                &*(slice as *const _ as *const [std::ptr::NonNull<u32>])
+                &*(ptr::from_ref(slice) as *const [ptr::NonNull<u32>])
             };
 
             let sequences = self.sequences();
@@ -3581,7 +3581,7 @@ mod inner {
         ffi::{c_char, CStr},
         fmt,
         ops::{Index, Not},
-        ptr::NonNull,
+        ptr::{self, NonNull},
         slice,
     };
 
@@ -3741,7 +3741,7 @@ mod inner {
             // Safety:
             // - a slice of pointers has the same layout as a slice of NonNull pointers.
             // - we just checked that none of the pointers are null.
-            unsafe { Self(&*(slice as *const [*const c_char] as *const [NonNull<c_char>])) }
+            unsafe { Self(&*(ptr::from_ref(slice) as *const [NonNull<c_char>])) }
         }
 
         #[inline]

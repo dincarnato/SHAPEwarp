@@ -237,7 +237,7 @@ pub struct AlignmentArgs {
 #[serde(rename_all = "kebab-case")]
 pub struct AlignmentFoldingEvaluationArgs {
     /// Alignments passing the --inclusion-evalue threshold, are further evaluated for the presence
-    /// or a conserved RNA structure by using RNAalifold
+    /// or a conserved RNA structure by using `RNAalifold`
     #[clap(long, alias = "evalAlignFold")]
     pub eval_align_fold: bool,
 

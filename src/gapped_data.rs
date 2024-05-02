@@ -573,27 +573,6 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct IndexAccessIter<'a, T, I> {
-    items: &'a [T],
-    indices: I,
-}
-
-impl<'a, T, I> Iterator for IndexAccessIter<'a, T, I>
-where
-    I: Iterator<Item = usize>,
-{
-    type Item = &'a T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.indices.next().map(|index| &self.items[index])
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.indices.size_hint()
-    }
-}
-
 pub(crate) struct ShuffledAlignment<'a, 'b> {
     alignment: AlignedSequenceRef<'a>,
     indices: slice::Iter<'b, usize>,
@@ -676,9 +655,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{array, iter, ops::Range};
+    use std::{iter, ops::Range};
 
-    use rand::{seq::SliceRandom, thread_rng};
+    use rand::thread_rng;
 
     use crate::{
         aligner::{AlignedSequence, AlignedSequenceRef, BaseOrGap},
@@ -848,18 +827,6 @@ mod tests {
             super::get_block_range(7, 7, Some(&DifferentBlock { index: 5, len: 11 })),
             53..60,
         );
-    }
-
-    #[test]
-    fn index_access_iter() {
-        let data = array::from_fn::<_, 100, _>(|index| index);
-        let mut indices = data;
-        indices.shuffle(&mut thread_rng());
-        assert!(super::IndexAccessIter {
-            items: &data,
-            indices: indices.iter().copied(),
-        }
-        .eq(indices.iter().copied().map(|index| &data[index])));
     }
 
     fn shuffled_gapped_inner_impl(block_size: u16, data_len: u16, gaps: &[Range<u16>]) {

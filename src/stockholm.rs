@@ -212,7 +212,7 @@ pub struct Sequence {
 #[allow(unused)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum FeatureAnnotation {
-    /// Accession number in form PFxxxxx (Pfam) or RFxxxxx (Rfam).
+    /// Accession number in form `PFxxxxx` (Pfam) or `RFxxxxx` (Rfam).
     AccessionNumber(String),
 
     /// One word name for family.

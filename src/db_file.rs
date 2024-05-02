@@ -3,6 +3,7 @@ use std::{
     fs::File,
     io::{self, BufReader, Read, Seek, SeekFrom},
     path::Path,
+    ptr,
 };
 
 use itertools::Itertools;
@@ -107,7 +108,7 @@ impl ReactivityWithPlaceholder {
         // Safety:
         // - `ReactivityWithPlaceholder` is transparent and it contains only a `Reactivity`
         // - lifetime is maintained
-        unsafe { &*(this as *const [ReactivityWithPlaceholder] as *const [Reactivity]) }
+        unsafe { &*(ptr::from_ref(this) as *const [Reactivity]) }
     }
 
     pub fn inner(self) -> Reactivity {
