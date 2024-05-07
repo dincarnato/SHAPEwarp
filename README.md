@@ -17,7 +17,7 @@ Edoardo Morandi (emorandi[at]rnaframework.com)<br/>
 Danny Incarnato (dincarnato[at]rnaframework.com)<br/>
 
 
-## Reference
+## References
 
 Morandi *et al*., 2022. SHAPE-guided RNA structure homology search and motif discovery. Nature Communications (PMID: [35361788](https://pubmed.ncbi.nlm.nih.gov/35361788/))
 
@@ -33,43 +33,26 @@ Please see <http://www.gnu.org/licenses/> for more information.
 
 - Linux system
 - Rust and Cargo (Installation instructions: <https://doc.rust-lang.org/cargo/getting-started/installation.html>)
-- RNA Framework v2.7.2 or higher (<https://github.com/dincarnato/RNAFramework/>)
-- FFI::Platypus v1.56 or higher (<https://metacpan.org/pod/FFI::Platypus>)
-- FFI::Platypus::Lang::Rust v0.09 or higher (<https://metacpan.org/pod/FFI::Platypus::Lang::Rust>)
 
 
 ## Installation
 
-Clone the SHAPEwarp git repository:
-
 ```bash
-git clone https://github.com/dincarnato/SHAPEwarp
-```
-This will create a "SHAPEwarp" folder.<br/>
-To compile the modules needed for kmer lookup issue:
+$ git clone https://github.com/dincarnato/SHAPEwarp-devel
+$ cd SHAPEwarp-devel
 
-```bash
-cd SHAPEwarp
-perl Makefile.PL
-make
-make test
-```
-If the installation went fine, the expected output of the ``make test`` command should look like the following:
+# Add to PKG_CONFIG_PATH the path to the directory containing RNAlib2.pc from the ViennaRNA package
+$ export PKG_CONFIG_PATH=/path/to/dir/containing/RNAlib2.pc
 
-```bash
-"/usr/bin/perl" -MFFI::Build::MM=cmd -e fbx_build
-"/usr/bin/perl" -MFFI::Build::MM=cmd -e fbx_test
-PERL_DL_NONLAZY=1 "/usr/bin/perl" "-MExtUtils::Command::MM" "-MTest::Harness" "-e" "undef *Test::Harness::Switches; test_harness(0, 'blib/lib', 'blib/arch')" t/*.t
-t/basic.t .. ok
-All tests successful.
-Files=1, Tests=1,  1 wallclock secs ( 0.03 usr  0.00 sys +  0.54 cusr  0.04 csys =  0.61 CPU)
-Result: PASS
+$ export RUSTFLAGS=-Ctarget-cpu=native
+$ cargo build --release
 ```
-SHAPEwarp builds on top of the [RNA Framework](https://github.com/dincarnato/RNAFramework/). To use SHAPEwarp, the ``lib/`` folder of the RNA Framework must be added to the ``PERL5LIB`` environment variable:
 
-```bash
-export PERL5LIB=$PERL5LIB:/path/to/RNAFramework/lib
-```
+The SHAPEwarp executable will be located under ``target/release/``.<br/>
+
+
+### Note for Mac OS X users:
+To compile SHAPEwarp on Mac OS X, after having installed the ViennaRNA package, open the RNAlib2.pc file in a text editor and replace the ``-lstdc++`` flag with ``-lc++``.</br>
 
 
 ## Testing the SHAPEwarp installation
@@ -77,14 +60,11 @@ export PERL5LIB=$PERL5LIB:/path/to/RNAFramework/lib
 To test SHAPEwarp on a small test dataset, issue the following command from within the SHAPEwarp install directory:
 
 ```bash
-./SHAPEwarp -q t/query.txt -d t/ -o test_out -ow
+target/release/shapewarp --query test_data/query.txt --database test_data/test.db --output test_out --ow
 ```
-The search will take &lt;1 minute and the expected output should look like the following:
+The search will take less than 10 seconds, and the expected output should look like the following:
 
 ```bash
-Query   DB             Qstart  Qend  Dstart  Dend   Qseed    Dseed      Score    P-value    E-value
-
-test    16S_Bsubtilis  7       170   916     1079   16-100   925-1009   173.76   4.83e-08   7.63e-06   !
-
-test    16S_Bsubtilis  1       170   128     297    79-100   206-227    86.50    5.01e-04   0.08       ?
+ query    db_entry       query_start  query_end  db_start  db_end  query_seed  db_seed  score    pvalue    evalue    status
+ 16S_750  16S_Bsubtilis  0            99         758       857     15-79       773-837  109.103  5.665e-8  1.003e-5  !
 ```
