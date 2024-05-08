@@ -21,6 +21,8 @@ Danny Incarnato (dincarnato[at]rnaframework.com)<br/>
 
 Morandi *et al*., 2022. SHAPE-guided RNA structure homology search and motif discovery. Nature Communications (PMID: [35361788](https://pubmed.ncbi.nlm.nih.gov/35361788/))
 
+Scholten *et al*., 2024. SHAPEwarp-web: sequence-agnostic search for structurally homologous RNA regions across databases of chemical probing data. Nucleic Acids Research (PMID: [38709889](https://pubmed.ncbi.nlm.nih.gov/38709889/))
+
 
 ## License
 
