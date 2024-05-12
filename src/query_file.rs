@@ -68,10 +68,10 @@ impl SequenceEntry for Entry {
 pub enum Error {
     TruncatedExpectedSequence,
     TruncatedExpectedReactivities,
-    InvalidSequenceBase(Box<RowColumn>),
-    InvalidReactivity(Box<RowColumn>),
+    InvalidSequenceBase(RowColumn),
+    InvalidReactivity(RowColumn),
     EmptySequence(usize),
-    UnmatchedLengths(Box<UnmatchedLengths>),
+    UnmatchedLengths(UnmatchedLengths),
     OpenFile(io::Error),
     ReadNameLine(io::Error),
     ReadSequenceLine(io::Error),
@@ -216,10 +216,10 @@ where
                         .parse::<Reactivity>()
                         .map(ReactivityWithPlaceholder::from)
                         .map_err(|_| {
-                            Error::InvalidReactivity(Box::new(RowColumn {
+                            Error::InvalidReactivity(RowColumn {
                                 row: file_row,
                                 column,
-                            }))
+                            })
                         })?
                 };
 
@@ -229,11 +229,11 @@ where
             .collect::<Result<Vec<_>, _>>()?;
 
         if sequence.len() != reactivities.len() {
-            return Err(Error::UnmatchedLengths(Box::new(UnmatchedLengths {
+            return Err(Error::UnmatchedLengths(UnmatchedLengths {
                 sequence: sequence.len(),
                 reactivities: reactivities.len(),
                 line: file_row - 2,
-            })));
+            }));
         }
 
         entries.push(Entry {
@@ -261,19 +261,19 @@ fn parse_sequence(raw_line: &str, row: usize) -> Result<(Vec<Base>, Molecule), E
                 (b'T', Molecule::Unknown) => molecule = Molecule::Dna,
                 (b'U', Molecule::Unknown) => molecule = Molecule::Rna,
                 (b'T', Molecule::Rna) | (b'U', Molecule::Dna) => {
-                    return Err(Error::InvalidSequenceBase(Box::new(RowColumn {
+                    return Err(Error::InvalidSequenceBase(RowColumn {
                         row,
                         column: index + 1,
-                    })));
+                    }));
                 }
                 _ => {}
             }
 
             Base::try_from(c).map_err(|_| {
-                Error::InvalidSequenceBase(Box::new(RowColumn {
+                Error::InvalidSequenceBase(RowColumn {
                     row,
                     column: index + 1,
-                }))
+                })
             })
         })
         .collect::<Result<_, _>>()
@@ -387,7 +387,7 @@ mod tests {
         let err = read_file_content(Cursor::new(CONTENT)).unwrap_err();
 
         if let Error::InvalidSequenceBase(err) = err {
-            assert_eq!(*err, RowColumn { row: 6, column: 3 });
+            assert_eq!(err, RowColumn { row: 6, column: 3 });
         } else {
             panic!()
         }
@@ -399,7 +399,7 @@ mod tests {
         let err = read_file_content(Cursor::new(CONTENT)).unwrap_err();
 
         if let Error::InvalidReactivity(err) = err {
-            assert_eq!(*err, RowColumn { row: 7, column: 11 });
+            assert_eq!(err, RowColumn { row: 7, column: 11 });
         } else {
             panic!()
         }
@@ -412,7 +412,7 @@ mod tests {
 
         if let Error::UnmatchedLengths(err) = err {
             assert_eq!(
-                *err,
+                err,
                 UnmatchedLengths {
                     sequence: 6,
                     reactivities: 5,
