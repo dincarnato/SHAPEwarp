@@ -72,7 +72,10 @@ pub enum Error {
     InvalidReactivity(Box<RowColumn>),
     EmptySequence(usize),
     UnmatchedLengths(Box<UnmatchedLengths>),
-    IO(Box<io::Error>),
+    OpenFile(io::Error),
+    ReadNameLine(io::Error),
+    ReadSequenceLine(io::Error),
+    ReadReactivityLine(io::Error),
 }
 
 impl Display for Error {
@@ -103,7 +106,12 @@ impl Display for Error {
                     lengths.sequence, lengths.reactivities, lengths.line,
                 )
             }
-            Error::IO(_) => f.write_str("I/O error"),
+            Error::OpenFile(_) => f.write_str("cannot open file"),
+            Error::ReadNameLine(_) => f.write_str("cannot read line containing sequence name"),
+            Error::ReadSequenceLine(_) => f.write_str("cannot read line containing sequence data"),
+            Error::ReadReactivityLine(_) => {
+                f.write_str("cannot read line containing sequence reactivity")
+            }
         }
     }
 }
@@ -117,14 +125,12 @@ impl StdError for Error {
             | Error::InvalidReactivity(_)
             | Error::EmptySequence(_)
             | Error::UnmatchedLengths(_) => None,
-            Error::IO(source) => Some(source),
-        }
-    }
-}
 
-impl From<Box<io::Error>> for Error {
-    fn from(value: Box<io::Error>) -> Self {
-        Self::IO(value)
+            Error::OpenFile(source)
+            | Error::ReadNameLine(source)
+            | Error::ReadSequenceLine(source)
+            | Error::ReadReactivityLine(source) => Some(source),
+        }
     }
 }
 
@@ -143,7 +149,7 @@ pub struct UnmatchedLengths {
 
 #[inline]
 pub fn read_file(path: &Path) -> Result<Vec<Entry>, Error> {
-    let reader = BufReader::new(File::open(path).map_err(Box::new)?);
+    let reader = BufReader::new(File::open(path).map_err(Error::OpenFile)?);
     read_file_content(reader)
 }
 
@@ -158,7 +164,7 @@ where
     loop {
         line.clear();
         file_row += 1;
-        if reader.read_line(&mut line).map_err(Box::new)? == 0 {
+        if reader.read_line(&mut line).map_err(Error::ReadNameLine)? == 0 {
             break;
         }
 
@@ -170,7 +176,11 @@ where
 
         file_row += 1;
         line.clear();
-        if reader.read_line(&mut line).map_err(Box::new)? == 0 {
+        if reader
+            .read_line(&mut line)
+            .map_err(Error::ReadSequenceLine)?
+            == 0
+        {
             return Err(Error::TruncatedExpectedSequence);
         }
 
@@ -182,7 +192,11 @@ where
 
         file_row += 1;
         line.clear();
-        if reader.read_line(&mut line).map_err(Box::new)? == 0 {
+        if reader
+            .read_line(&mut line)
+            .map_err(Error::ReadReactivityLine)?
+            == 0
+        {
             return Err(Error::TruncatedExpectedReactivities);
         }
 

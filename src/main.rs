@@ -543,7 +543,7 @@ pub(crate) enum Base {
 }
 
 impl Base {
-    fn try_from_nibble(nibble: u8) -> Result<Self, InvalidEncodedBase> {
+    fn try_from_nibble(nibble: u8) -> Result<Self, InvalidBaseNibble> {
         use Base::{A, C, G, N, T};
         Ok(match nibble {
             0 => A,
@@ -551,13 +551,13 @@ impl Base {
             2 => G,
             3 => T,
             4 => N,
-            _ => return Err(InvalidEncodedBase),
+            _ => return Err(InvalidBaseNibble),
         })
     }
 
-    fn try_pair_from_byte(byte: u8) -> Result<[Self; 2], InvalidEncodedBase> {
-        let first = Base::try_from_nibble(byte >> 4)?;
-        let second = Base::try_from_nibble(byte & 0x0F)?;
+    fn try_pair_from_byte(byte: u8) -> Result<[Self; 2], InvalidBasePair> {
+        let first = Base::try_from_nibble(byte >> 4).map_err(InvalidBasePair::First)?;
+        let second = Base::try_from_nibble(byte & 0x0F).map_err(InvalidBasePair::First)?;
 
         Ok([first, second])
     }
@@ -605,7 +605,7 @@ impl Base {
 }
 
 impl TryFrom<u8> for Base {
-    type Error = InvalidEncodedBase;
+    type Error = InvalidBase;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         Ok(match value {
@@ -614,8 +614,17 @@ impl TryFrom<u8> for Base {
             b'G' => Self::G,
             b'T' | b'U' => Self::T,
             b'N' => Self::N,
-            _ => return Err(InvalidEncodedBase),
+            _ => return Err(InvalidBase(value)),
         })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct InvalidBase(u8);
+
+impl Display for InvalidBase {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "character '{}' is not a valid base", char::from(self.0))
     }
 }
 
@@ -644,8 +653,41 @@ impl fmt::Display for Sequence<'_> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InvalidBasePair {
+    First(InvalidBaseNibble),
+    Second(InvalidBaseNibble),
+}
+
+impl Display for InvalidBasePair {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let base = match self {
+            InvalidBasePair::First(_) => "first",
+            InvalidBasePair::Second(_) => "second",
+        };
+
+        write!(f, "{base} nibble of the encoded base pair is invalid")
+    }
+}
+
+impl StdError for InvalidBasePair {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            InvalidBasePair::First(source) | InvalidBasePair::Second(source) => Some(source),
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct InvalidEncodedBase;
+pub struct InvalidBaseNibble;
+
+impl Display for InvalidBaseNibble {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("encoded nibble is not a valid base")
+    }
+}
+
+impl StdError for InvalidBaseNibble {}
 
 fn calc_seed_alignment_score_from_reactivity(
     query: &[ReactivityWithPlaceholder],
@@ -773,7 +815,8 @@ fn transform_db(
 
 #[derive(Debug)]
 pub enum Error {
-    Fftw(fftw::error::Error),
+    CreateMass(fftw::error::Error),
+    RunMass(fftw::error::Error),
     Io(std::io::Error),
     Reader(db_file::ReaderError),
     ReaderEntry(db_file::EntryError),
@@ -782,7 +825,8 @@ pub enum Error {
 impl Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::Fftw(_) => f.write_str("FFTW error"),
+            Error::CreateMass(_) => f.write_str("unable to create instance of MASS runner"),
+            Error::RunMass(_) => f.write_str("unable to run MASS algorithm"),
             Error::Io(_) => f.write_str("I/O error"),
             Error::Reader(_) => f.write_str("DB reader error"),
             Error::ReaderEntry(_) => f.write_str("DB reader entry error"),
@@ -793,17 +837,11 @@ impl Display for Error {
 impl StdError for Error {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match self {
-            Error::Fftw(source) => Some(source),
+            Error::CreateMass(source) | Error::RunMass(source) => Some(source),
             Error::Io(source) => Some(source),
             Error::Reader(source) => Some(source),
             Error::ReaderEntry(source) => Some(source),
         }
-    }
-}
-
-impl From<fftw::error::Error> for Error {
-    fn from(value: fftw::error::Error) -> Self {
-        Self::Fftw(value)
     }
 }
 
@@ -851,7 +889,7 @@ fn get_matching_kmers(
         kmer_max_match_every_nt,
         max_sequence_distance,
     };
-    let mut mass = Mass::new(db_data.reactivity.len())?;
+    let mut mass = Mass::new(db_data.reactivity.len()).map_err(Error::CreateMass)?;
 
     let kmer_len_usize = kmer_len.into();
     let last_kmer_index = trimmed_query_range.end.saturating_sub(kmer_len_usize);
@@ -870,7 +908,8 @@ fn get_matching_kmers(
             query_match_handler.run(kmer_index, kmer, kmer_sequence, &mut mass)
         })
         .flatten_ok()
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(Error::RunMass)?;
 
     Ok(matches)
 }

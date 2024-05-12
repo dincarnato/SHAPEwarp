@@ -6,12 +6,13 @@ use std::{
     io::{self, BufReader, Read, Seek, SeekFrom},
     path::Path,
     ptr,
+    string::FromUtf8Error,
 };
 
 use itertools::Itertools;
 use serde::{Serialize, Serializer};
 
-use crate::{Base, Molecule, Reactivity, SequenceEntry};
+use crate::{Base, InvalidBasePair, Molecule, Reactivity, SequenceEntry};
 
 const END_SIZE: u8 = 17;
 const END_MARKER: &[u8] = b"[eofdb]";
@@ -29,15 +30,17 @@ impl<R> Reader<R>
 where
     R: Read + Seek,
 {
-    pub fn new(mut reader: R) -> Result<Self, Error> {
+    pub fn new(mut reader: R) -> Result<Self, NewReaderError> {
+        use NewReaderError as E;
+
         let end_offset = reader
             .seek(SeekFrom::End(-i64::from(END_SIZE)))
-            .map_err(|_| ReaderError::TooSmall)?;
+            .map_err(E::SeekToMetadata)?;
         let mut end_buf = [0; END_SIZE as usize];
-        reader.read_exact(&mut end_buf)?;
+        reader.read_exact(&mut end_buf).map_err(E::ReadMetadata)?;
 
         if &end_buf[10..17] != END_MARKER {
-            return Err(ReaderError::InvalidMarker.into());
+            return Err(E::InvalidMarker);
         }
 
         let db_len = u64::from_le_bytes(end_buf[0..8].try_into().unwrap());
@@ -61,6 +64,36 @@ where
             reader: inner,
             end_offset,
             offset: 0,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum NewReaderError {
+    SeekToMetadata(io::Error),
+    ReadMetadata(io::Error),
+    InvalidMarker,
+}
+
+impl Display for NewReaderError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            NewReaderError::SeekToMetadata(_) => "unable to seek to metadata",
+            NewReaderError::ReadMetadata(_) => "unable to read metadata",
+            NewReaderError::InvalidMarker => "invalid metadata marker",
+        };
+
+        f.write_str(s)
+    }
+}
+
+impl StdError for NewReaderError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            NewReaderError::SeekToMetadata(source) | NewReaderError::ReadMetadata(source) => {
+                Some(source)
+            }
+            NewReaderError::InvalidMarker => None,
         }
     }
 }
@@ -239,73 +272,78 @@ impl<R> Iterator for EntryIter<'_, R>
 where
     R: Seek + Read,
 {
-    type Item = Result<Entry, EntryIoError>;
+    type Item = Result<Entry, NextEntryError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        macro_rules! ok {
-            ($expr:expr) => {
-                match $expr {
-                    Ok(ok) => ok,
-                    Err(err) => return Some(Err(err.into())),
-                }
-            };
-        }
+        (self.offset != self.end_offset).then(|| self.next_entry())
+    }
+}
 
-        if self.offset == self.end_offset {
-            return None;
-        }
+impl<R> EntryIter<'_, R>
+where
+    R: Seek + Read,
+{
+    fn next_entry(&mut self) -> Result<Entry, NextEntryError> {
+        use NextEntryError as E;
 
         if self.offset == 0 {
-            ok!(self.reader.seek(SeekFrom::Start(0)));
+            self.reader.seek(SeekFrom::Start(0)).map_err(E::SeekStart)?;
         }
 
         let mut id_len_with_nul_buf = [0; 4];
-        ok!(self.reader.read_exact(&mut id_len_with_nul_buf));
+        self.reader
+            .read_exact(&mut id_len_with_nul_buf)
+            .map_err(E::ReadIdLen)?;
         let id_len_with_nul: usize = u32::from_le_bytes(id_len_with_nul_buf)
             .try_into()
             .expect("cannot represent id length as usize for the current architecture");
         let mut sequence_id = vec![0; id_len_with_nul];
-        ok!(self.reader.read_exact(&mut sequence_id));
+        self.reader
+            .read_exact(&mut sequence_id)
+            .map_err(E::ReadSequenceId)?;
         if sequence_id.pop().filter(|&b| b == 0).is_none() {
-            return Some(Err(EntryError::InvalidSequenceId.into()));
+            return Err(E::MissingSequenceIdNul);
         }
         let sequence_id =
-            ok!(String::from_utf8(sequence_id).map_err(|_| { EntryError::InvalidSequenceId }));
+            String::from_utf8(sequence_id).map_err(NextEntryError::InvalidSequenceId)?;
         let mut sequence_len_buf = [0; 4];
-        ok!(self.reader.read_exact(&mut sequence_len_buf));
+        self.reader
+            .read_exact(&mut sequence_len_buf)
+            .map_err(E::ReadSequenceLen)?;
         let sequence_len: usize = u32::from_le_bytes(sequence_len_buf)
             .try_into()
             .expect("cannot represent sequence length as usize for the current architecture");
 
         let sequence_bytes = sequence_len / 2 + sequence_len % 2;
-        let mut sequence = ok!(self
+        let mut sequence = self
             .reader
             .bytes()
             .take(sequence_bytes)
-            .map(
-                |result| result.map_err(EntryIoError::from).and_then(|byte| {
+            .map(|result| {
+                result.map_err(E::ReadSequence).and_then(|byte| {
                     Base::try_pair_from_byte(byte)
                         .map(|[first, second]| [first, second])
-                        .map_err(|_| EntryError::InvalidBase.into())
+                        .map_err(E::InvalidEncodedBase)
                 })
-            )
+            })
             .flatten_ok()
-            .collect::<Result<Vec<_>, _>>());
+            .collect::<Result<Vec<_>, _>>()?;
 
         if sequence_len > 0 && sequence_len % 2 == 1 {
             sequence.pop().unwrap();
         }
 
         if sequence.len() != sequence_len {
-            return Some(Err(EntryError::UnexpectedEof.into()));
+            return Err(E::UnexpectedEof);
         }
 
-        let reactivity = ok!((0..sequence_len)
+        let reactivity = (0..sequence_len)
             .map(|_| {
                 let mut reactivity_buffer = [0; 8];
                 self.reader
                     .read_exact(&mut reactivity_buffer)
                     .map(|()| reactivity_buffer)
+                    .map_err(E::ReadReactivity)
             })
             // Reactivity is an alias to either f32 or f64
             .map_ok(|bytes| {
@@ -315,23 +353,81 @@ where
                 let reactivity = f64::from_le_bytes(bytes) as Reactivity;
                 ReactivityWithPlaceholder::from(reactivity)
             })
-            .collect::<Result<Vec<_>, _>>());
+            .collect::<Result<Vec<_>, _>>()?;
 
         if reactivity.len() != sequence_len {
-            return Some(Err(EntryError::UnexpectedEof.into()));
+            return Err(E::UnexpectedEof);
         }
 
-        let offset = ok!(self.reader.stream_position());
+        let offset = self.reader.stream_position().map_err(E::StreamPosition)?;
         if offset > self.end_offset {
-            return Some(Err(EntryError::SurpassedEofMarker.into()));
+            return Err(E::SurpassedEofMarker);
         }
         self.offset = offset;
 
-        Some(Ok(Entry {
+        Ok(Entry {
             id: sequence_id,
             sequence,
             reactivity,
-        }))
+        })
+    }
+}
+
+#[derive(Debug)]
+pub enum NextEntryError {
+    SeekStart(io::Error),
+    ReadIdLen(io::Error),
+    ReadSequenceId(io::Error),
+    MissingSequenceIdNul,
+    InvalidSequenceId(FromUtf8Error),
+    ReadSequenceLen(io::Error),
+    ReadSequence(io::Error),
+    InvalidEncodedBase(InvalidBasePair),
+    ReadReactivity(io::Error),
+    UnexpectedEof,
+    SurpassedEofMarker,
+    StreamPosition(io::Error),
+}
+
+impl Display for NextEntryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            NextEntryError::SeekStart(_) => "unable to seek to the start of the file",
+            NextEntryError::ReadIdLen(_) => "unable to read the length of the sequence id",
+            NextEntryError::ReadSequenceId(_) => "unable to read sequence id",
+            NextEntryError::MissingSequenceIdNul => {
+                "sequence id does not have a nul termination character"
+            }
+            NextEntryError::InvalidSequenceId(_) => "sequence id is not valid",
+            NextEntryError::ReadSequenceLen(_) => "unable to read sequence length",
+            NextEntryError::ReadSequence(_) => "unable to read sequence content",
+            NextEntryError::InvalidEncodedBase(_) => "invalid encoded base",
+            NextEntryError::ReadReactivity(_) => "unable to read rectivity",
+            NextEntryError::UnexpectedEof => "unexpected end of file",
+            NextEntryError::SurpassedEofMarker => "end of file marker is being surpassed",
+            NextEntryError::StreamPosition(_) => "unable to get stream position",
+        };
+
+        f.write_str(s)
+    }
+}
+
+impl StdError for NextEntryError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            NextEntryError::SeekStart(source)
+            | NextEntryError::ReadIdLen(source)
+            | NextEntryError::ReadSequenceId(source)
+            | NextEntryError::ReadSequenceLen(source)
+            | NextEntryError::ReadSequence(source)
+            | NextEntryError::ReadReactivity(source)
+            | NextEntryError::StreamPosition(source) => Some(source),
+            NextEntryError::MissingSequenceIdNul
+            | NextEntryError::UnexpectedEof
+            | NextEntryError::SurpassedEofMarker => None,
+            NextEntryError::InvalidSequenceId(source) => Some(source),
+            NextEntryError::InvalidEncodedBase(source) => Some(source),
+        }
     }
 }
 
@@ -355,46 +451,8 @@ impl Display for ReaderError {
 impl StdError for ReaderError {}
 
 #[derive(Debug)]
-pub enum EntryIoError {
-    Io(io::Error),
-    Entry(EntryError),
-}
-
-impl Display for EntryIoError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
-            EntryIoError::Io(_) => "I/O error",
-            EntryIoError::Entry(_) => "entry error",
-        };
-
-        f.write_str(s)
-    }
-}
-
-impl StdError for EntryIoError {
-    fn source(&self) -> Option<&(dyn StdError + 'static)> {
-        match self {
-            EntryIoError::Io(source) => Some(source),
-            EntryIoError::Entry(source) => Some(source),
-        }
-    }
-}
-
-impl From<io::Error> for EntryIoError {
-    fn from(value: io::Error) -> Self {
-        Self::Io(value)
-    }
-}
-
-impl From<EntryError> for EntryIoError {
-    fn from(value: EntryError) -> Self {
-        Self::Entry(value)
-    }
-}
-
-#[derive(Debug)]
 pub enum EntryError {
-    InvalidSequenceId,
+    InvalidSequenceId(FromUtf8Error),
     InvalidBase,
     UnexpectedEof,
     SurpassedEofMarker,
@@ -403,7 +461,7 @@ pub enum EntryError {
 impl Display for EntryError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            EntryError::InvalidSequenceId => "Invalid sequence ID string",
+            EntryError::InvalidSequenceId(_) => "Invalid sequence ID string",
             EntryError::InvalidBase => "Invalid encoded nucleobase",
             EntryError::UnexpectedEof => "Unexpected end of file",
             EntryError::SurpassedEofMarker => "End of file marked has been surpassed",
@@ -413,21 +471,30 @@ impl Display for EntryError {
     }
 }
 
-impl StdError for EntryError {}
+impl StdError for EntryError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            EntryError::InvalidSequenceId(source) => Some(source),
+            EntryError::InvalidBase
+            | EntryError::UnexpectedEof
+            | EntryError::SurpassedEofMarker => None,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum Error {
-    Io(io::Error),
-    Reader(ReaderError),
-    Entry(EntryError),
+    OpenFile(io::Error),
+    NewReader(NewReaderError),
+    Entry(NextEntryError),
 }
 
 impl Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            Error::Io(_) => "I/O error",
-            Error::Reader(_) => "DB reader errro",
-            Error::Entry(_) => "entry error",
+            Error::OpenFile(_) => "unable to open file",
+            Error::NewReader(_) => "unable to create new reader",
+            Error::Entry(_) => "unable to get the next entry",
         };
 
         f.write_str(s)
@@ -437,37 +504,20 @@ impl Display for Error {
 impl StdError for Error {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match self {
-            Error::Io(source) => Some(source),
-            Error::Reader(source) => Some(source),
+            Error::OpenFile(source) => Some(source),
+            Error::NewReader(source) => Some(source),
             Error::Entry(source) => Some(source),
         }
     }
 }
 
-impl From<io::Error> for Error {
-    fn from(value: io::Error) -> Self {
-        Self::Io(value)
-    }
-}
-
-impl From<ReaderError> for Error {
-    fn from(value: ReaderError) -> Self {
-        Self::Reader(value)
-    }
-}
-
-impl From<EntryIoError> for Error {
-    fn from(error: EntryIoError) -> Self {
-        match error {
-            EntryIoError::Io(e) => Error::Io(e),
-            EntryIoError::Entry(e) => Error::Entry(e),
-        }
-    }
-}
-
 pub fn read_file(path: &Path) -> Result<Vec<Entry>, Error> {
-    let mut reader = Reader::new(BufReader::new(File::open(path)?))?;
-    let entries = reader.entries().collect::<Result<_, _>>()?;
+    let file = File::open(path).map_err(Error::OpenFile)?;
+    let mut reader = Reader::new(BufReader::new(file)).map_err(Error::NewReader)?;
+    let entries = reader
+        .entries()
+        .collect::<Result<_, _>>()
+        .map_err(Error::Entry)?;
     Ok(entries)
 }
 
