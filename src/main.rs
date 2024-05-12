@@ -19,6 +19,7 @@ mod stockholm;
 mod viennarna;
 
 use std::{
+    error::Error as StdError,
     fmt::{self, Display, Write},
     fs::{self, File},
     io::{self, BufWriter},
@@ -770,19 +771,40 @@ fn transform_db(
     Ok(db_transform)
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum Error {
-    #[error("FFTW error: {0}")]
-    Fftw(#[from] fftw::error::Error),
+    Fftw(fftw::error::Error),
+    Io(std::io::Error),
+    Reader(db_file::ReaderError),
+    ReaderEntry(db_file::EntryError),
+}
 
-    #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
+impl Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::Fftw(_) => f.write_str("FFTW error"),
+            Error::Io(_) => f.write_str("I/O error"),
+            Error::Reader(_) => f.write_str("DB reader error"),
+            Error::ReaderEntry(_) => f.write_str("DB reader entry error"),
+        }
+    }
+}
 
-    #[error("DB reader error: {0}")]
-    Reader(#[from] db_file::ReaderError),
+impl StdError for Error {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            Error::Fftw(source) => Some(source),
+            Error::Io(source) => Some(source),
+            Error::Reader(source) => Some(source),
+            Error::ReaderEntry(source) => Some(source),
+        }
+    }
+}
 
-    #[error("DB reader entry error: {0}")]
-    ReaderEntry(#[from] db_file::EntryError),
+impl From<fftw::error::Error> for Error {
+    fn from(value: fftw::error::Error) -> Self {
+        Self::Fftw(value)
+    }
 }
 
 fn get_matching_kmers(
@@ -986,7 +1008,7 @@ where
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.contains('.') {
-            let x = s.parse::<f64>()?;
+            let x = s.parse::<f64>().map_err(ParseDistanceError::Fractional)?;
             if x <= 1. {
                 Ok(Self::Fractional(x))
             } else {
@@ -999,16 +1021,35 @@ where
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, thiserror::Error)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ParseDistanceError<E> {
-    #[error("invalid integral distance: {0}")]
     Integral(E),
-
-    #[error("invalid fractional distance: {0}")]
-    Fractional(#[from] ParseFloatError),
-
-    #[error("invalid fractional distance greater than 1")]
+    Fractional(ParseFloatError),
     InvalidFractional,
+}
+
+impl<E> Display for ParseDistanceError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            ParseDistanceError::Integral(_) => "invalid integral distance",
+            ParseDistanceError::Fractional(_) => "invalid fractional distance",
+            ParseDistanceError::InvalidFractional => "invalid fractional distance greater than 1",
+        };
+        f.write_str(s)
+    }
+}
+
+impl<E> StdError for ParseDistanceError<E>
+where
+    E: StdError + 'static,
+{
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            ParseDistanceError::Integral(source) => Some(source),
+            ParseDistanceError::Fractional(source) => Some(source),
+            ParseDistanceError::InvalidFractional => None,
+        }
+    }
 }
 
 fn gini_index<T>(data: &[T]) -> T

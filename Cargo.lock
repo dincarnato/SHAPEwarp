@@ -1212,7 +1212,6 @@ dependencies = [
  "statrs",
  "tabled",
  "tempfile",
- "thiserror",
  "toml_edit",
  "viennarna-mfe-sys",
 ]

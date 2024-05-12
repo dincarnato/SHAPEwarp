@@ -1,4 +1,6 @@
 use std::{
+    error::Error as StdError,
+    fmt::{self, Display},
     fs::File,
     io::{self, BufRead, BufReader},
     ops::Not,
@@ -62,33 +64,68 @@ impl SequenceEntry for Entry {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum Error {
-    #[error("file truncated, expected sequence")]
     TruncatedExpectedSequence,
-
-    #[error("file truncated, expected reactivities")]
     TruncatedExpectedReactivities,
-
-    #[error("invalid sequence base at line {} and column {}", .0.row, .0.column)]
     InvalidSequenceBase(Box<RowColumn>),
-
-    #[error("invalid reactivity at line {} and column {}", .0.row, .0.column)]
     InvalidReactivity(Box<RowColumn>),
-
-    #[error("unexpected empty sequence at line {0}")]
     EmptySequence(usize),
-
-    #[error(
-        "unmatching lengths between sequence ({}) and reactivities ({}) for query starting at line {}",
-        .0.sequence,
-        .0.reactivities,
-        .0.line
-    )]
     UnmatchedLengths(Box<UnmatchedLengths>),
+    IO(Box<io::Error>),
+}
 
-    #[error("I/O error: {0}")]
-    IO(#[from] Box<io::Error>),
+impl Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::TruncatedExpectedSequence => f.write_str("file truncated, expected sequence"),
+            Error::TruncatedExpectedReactivities => {
+                f.write_str("file truncated, expected reactivities")
+            }
+            Error::InvalidSequenceBase(row_column) => {
+                write!(
+                    f,
+                    "invalid sequence base at line {} and column {}",
+                    row_column.row, row_column.column,
+                )
+            }
+            Error::InvalidReactivity(row_column) => write!(
+                f,
+                "invalid reactivity at line {} and column {}",
+                row_column.row, row_column.column,
+            ),
+            Error::EmptySequence(row) => write!(f, "unexpected empty sequence at line {row}"),
+            Error::UnmatchedLengths(lengths) => {
+                write!(
+                    f,
+                    "unmatching lengths between sequence ({}) and reactivities ({}) for query \
+                    starting at line {}",
+                    lengths.sequence, lengths.reactivities, lengths.line,
+                )
+            }
+            Error::IO(_) => f.write_str("I/O error"),
+        }
+    }
+}
+
+impl StdError for Error {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            Error::TruncatedExpectedSequence
+            | Error::TruncatedExpectedReactivities
+            | Error::InvalidSequenceBase(_)
+            | Error::InvalidReactivity(_)
+            | Error::EmptySequence(_)
+            | Error::UnmatchedLengths(_) => None,
+            Error::IO(source) => Some(source),
+        }
+    }
+}
+
+impl From<Box<io::Error>> for Error {
+    fn from(value: Box<io::Error>) -> Self {
+        Self::IO(value)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,5 +1,7 @@
 use std::{
     convert::TryInto,
+    error::Error as StdError,
+    fmt::{self, Display},
     fs::File,
     io::{self, BufReader, Read, Seek, SeekFrom},
     path::Path,
@@ -333,49 +335,125 @@ where
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum ReaderError {
-    #[error("DB file is too small")]
     TooSmall,
-
-    #[error("DB file contains and invalid EOF marker")]
     InvalidMarker,
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum EntryIoError {
-    #[error("I/O error: {0}")]
-    Io(#[from] io::Error),
+impl Display for ReaderError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            ReaderError::TooSmall => "DB file is too small",
+            ReaderError::InvalidMarker => "DB file contains and invalid EOF marker",
+        };
 
-    #[error("Entry error: {0}")]
-    Entry(#[from] EntryError),
+        f.write_str(s)
+    }
 }
 
-#[derive(Debug, thiserror::Error)]
+impl StdError for ReaderError {}
+
+#[derive(Debug)]
+pub enum EntryIoError {
+    Io(io::Error),
+    Entry(EntryError),
+}
+
+impl Display for EntryIoError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            EntryIoError::Io(_) => "I/O error",
+            EntryIoError::Entry(_) => "entry error",
+        };
+
+        f.write_str(s)
+    }
+}
+
+impl StdError for EntryIoError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            EntryIoError::Io(source) => Some(source),
+            EntryIoError::Entry(source) => Some(source),
+        }
+    }
+}
+
+impl From<io::Error> for EntryIoError {
+    fn from(value: io::Error) -> Self {
+        Self::Io(value)
+    }
+}
+
+impl From<EntryError> for EntryIoError {
+    fn from(value: EntryError) -> Self {
+        Self::Entry(value)
+    }
+}
+
+#[derive(Debug)]
 pub enum EntryError {
-    #[error("Invalid sequence ID string")]
     InvalidSequenceId,
-
-    #[error("Invalid encoded nucleobase")]
     InvalidBase,
-
-    #[error("Unexpected end of file")]
     UnexpectedEof,
-
-    #[error("End of file marked has been surpassed")]
     SurpassedEofMarker,
 }
 
-#[derive(Debug, thiserror::Error)]
+impl Display for EntryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            EntryError::InvalidSequenceId => "Invalid sequence ID string",
+            EntryError::InvalidBase => "Invalid encoded nucleobase",
+            EntryError::UnexpectedEof => "Unexpected end of file",
+            EntryError::SurpassedEofMarker => "End of file marked has been surpassed",
+        };
+
+        f.write_str(s)
+    }
+}
+
+impl StdError for EntryError {}
+
+#[derive(Debug)]
 pub enum Error {
-    #[error("I/O error: {0}")]
-    Io(#[from] io::Error),
+    Io(io::Error),
+    Reader(ReaderError),
+    Entry(EntryError),
+}
 
-    #[error("DB reader error: {0}")]
-    Reader(#[from] ReaderError),
+impl Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Error::Io(_) => "I/O error",
+            Error::Reader(_) => "DB reader errro",
+            Error::Entry(_) => "entry error",
+        };
 
-    #[error("Entry error: {0}")]
-    Entry(#[from] EntryError),
+        f.write_str(s)
+    }
+}
+
+impl StdError for Error {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            Error::Io(source) => Some(source),
+            Error::Reader(source) => Some(source),
+            Error::Entry(source) => Some(source),
+        }
+    }
+}
+
+impl From<io::Error> for Error {
+    fn from(value: io::Error) -> Self {
+        Self::Io(value)
+    }
+}
+
+impl From<ReaderError> for Error {
+    fn from(value: ReaderError) -> Self {
+        Self::Reader(value)
+    }
 }
 
 impl From<EntryIoError> for Error {
