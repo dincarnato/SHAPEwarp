@@ -174,35 +174,7 @@ where
             return Err(Error::TruncatedExpectedSequence);
         }
 
-        let mut molecule = Molecule::default();
-        let sequence = line
-            .as_bytes()
-            .iter()
-            .copied()
-            .enumerate()
-            .skip_while(|(_, c)| c.is_ascii_whitespace())
-            .take_while(|(_, c)| c.is_ascii_whitespace().not())
-            .map(|(index, c)| {
-                match (c, molecule) {
-                    (b'T', Molecule::Unknown) => molecule = Molecule::Dna,
-                    (b'U', Molecule::Unknown) => molecule = Molecule::Rna,
-                    (b'T', Molecule::Rna) | (b'U', Molecule::Dna) => {
-                        return Err(Error::InvalidSequenceBase(Box::new(RowColumn {
-                            row: file_row,
-                            column: index + 1,
-                        })));
-                    }
-                    _ => {}
-                }
-
-                Base::try_from(c).map_err(|_| {
-                    Error::InvalidSequenceBase(Box::new(RowColumn {
-                        row: file_row,
-                        column: index + 1,
-                    }))
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let (sequence, molecule) = parse_sequence(&line, file_row)?;
 
         if sequence.is_empty() {
             return Err(Error::EmptySequence(file_row));
@@ -259,6 +231,39 @@ where
     }
 
     Ok(entries)
+}
+
+fn parse_sequence(raw_line: &str, row: usize) -> Result<(Vec<Base>, Molecule), Error> {
+    let mut molecule = Molecule::default();
+    raw_line
+        .as_bytes()
+        .iter()
+        .copied()
+        .enumerate()
+        .skip_while(|(_, c)| c.is_ascii_whitespace())
+        .take_while(|(_, c)| c.is_ascii_whitespace().not())
+        .map(|(index, c)| {
+            match (c, molecule) {
+                (b'T', Molecule::Unknown) => molecule = Molecule::Dna,
+                (b'U', Molecule::Unknown) => molecule = Molecule::Rna,
+                (b'T', Molecule::Rna) | (b'U', Molecule::Dna) => {
+                    return Err(Error::InvalidSequenceBase(Box::new(RowColumn {
+                        row,
+                        column: index + 1,
+                    })));
+                }
+                _ => {}
+            }
+
+            Base::try_from(c).map_err(|_| {
+                Error::InvalidSequenceBase(Box::new(RowColumn {
+                    row,
+                    column: index + 1,
+                }))
+            })
+        })
+        .collect::<Result<_, _>>()
+        .map(|sequence| (sequence, molecule))
 }
 
 #[cfg(test)]
