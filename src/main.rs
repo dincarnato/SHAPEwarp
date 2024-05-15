@@ -628,6 +628,8 @@ impl Display for InvalidBase {
     }
 }
 
+impl StdError for InvalidBase {}
+
 struct BaseDisplay {
     base: Base,
     molecule: Molecule,

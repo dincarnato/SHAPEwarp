@@ -1,4 +1,5 @@
 pub mod native;
+mod xml;
 
 use std::{
     convert::TryInto,
@@ -58,6 +59,12 @@ impl ReactivityWithPlaceholder {
 
     pub fn inner(self) -> Reactivity {
         self.0
+    }
+
+    #[inline]
+    #[must_use]
+    pub const fn nan_placeholder() -> Self {
+        Self(NAN_PLACEHOLDER)
     }
 }
 
@@ -230,11 +237,18 @@ impl StdError for EntryError {
 }
 
 pub fn read_db(path: &Path) -> Result<Vec<Entry>, Error> {
-    let extension = path.extension().ok_or(Error::NoExtension)?;
-    if extension.eq_ignore_ascii_case("db") {
-        native::read_file(path).map_err(Error::Native)
+    if path.is_dir() {
+        xml::read_directory(path).map_err(Error::Directory)
     } else {
-        Err(Error::InvalidExtension(extension.to_os_string()))
+        let extension = path.extension().ok_or(Error::NoExtension)?;
+        if extension.eq_ignore_ascii_case("db") {
+            native::read_file(path).map_err(Error::Native)
+        } else if extension.eq_ignore_ascii_case("xml") {
+            let entry = xml::read_file(path).map_err(Error::Xml)?;
+            Ok(vec![entry])
+        } else {
+            Err(Error::InvalidExtension(extension.to_os_string()))
+        }
     }
 }
 
@@ -243,6 +257,8 @@ pub enum Error {
     NoExtension,
     InvalidExtension(OsString),
     Native(native::Error),
+    Xml(xml::ReadFileError),
+    Directory(xml::ReadDirectoryError),
 }
 
 impl Display for Error {
@@ -257,6 +273,8 @@ impl Display for Error {
                 )
             }
             Error::Native(_) => f.write_str("cannot read native db file"),
+            Error::Xml(_) => f.write_str("cannot read xml db file"),
+            Error::Directory(_) => f.write_str("cannot read xml entries from a directory"),
         }
     }
 }
@@ -266,6 +284,8 @@ impl StdError for Error {
         match self {
             Error::NoExtension | Error::InvalidExtension(_) => None,
             Error::Native(source) => Some(source),
+            Error::Xml(source) => Some(source),
+            Error::Directory(source) => Some(source),
         }
     }
 }
