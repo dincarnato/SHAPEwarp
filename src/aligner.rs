@@ -1472,7 +1472,7 @@ mod tests {
             reactivity: query_reactivity,
         };
 
-        let target = db_file::read_file(Path::new("./test_data/test.db")).unwrap();
+        let target = db_file::read_db(Path::new("./test_data/test.db")).unwrap();
         let mut target = target.into_iter().next().unwrap();
         target.cap_reactivities(cli.max_reactivity);
         let target_slice = 838..;
@@ -1553,7 +1553,7 @@ mod tests {
             reactivity: query_reactivity,
         };
 
-        let target = db_file::read_file(Path::new("./test_data/test.db")).unwrap();
+        let target = db_file::read_db(Path::new("./test_data/test.db")).unwrap();
         let mut target = target.into_iter().next().unwrap();
         target.cap_reactivities(cli.max_reactivity);
         let target_slice = ..773;
@@ -1621,7 +1621,7 @@ mod tests {
             .into_iter()
             .next()
             .unwrap();
-        let target = db_file::read_file(Path::new("./test_data/test.db"))
+        let target = db_file::read_db(Path::new("./test_data/test.db"))
             .unwrap()
             .into_iter()
             .next()

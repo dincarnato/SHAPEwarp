@@ -104,7 +104,7 @@ fn main() -> anyhow::Result<()> {
     write_cli_to_file(&cli)?;
 
     let query_entries_orig = query_file::read_file(&cli.query)?;
-    let db_entries_orig = db_file::read_file(&cli.database)?;
+    let db_entries_orig = db_file::read_db(&cli.database)?;
 
     let query_entries: Vec<_> = query_entries_orig
         .iter()
@@ -128,7 +128,7 @@ fn main() -> anyhow::Result<()> {
         .shuffled_db
         .as_deref()
         .map(|shuffled_db_path| {
-            let mut shuffled_db = db_file::read_file(shuffled_db_path)?;
+            let mut shuffled_db = db_file::read_db(shuffled_db_path)?;
             shuffled_db
                 .iter_mut()
                 .for_each(|entry| entry.cap_reactivities(cli.max_reactivity));

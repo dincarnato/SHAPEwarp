@@ -435,7 +435,7 @@ mod tests {
     fn get_test_entries() -> TestEntries {
         let cli = Cli::dummy();
 
-        let mut test_db = db_file::Reader::new(Cursor::new(TEST_DB)).unwrap();
+        let mut test_db = db_file::native::Reader::new(Cursor::new(TEST_DB)).unwrap();
         let db_entry_orig = test_db
             .entries()
             .map(Result::unwrap)

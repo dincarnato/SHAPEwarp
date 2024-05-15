@@ -286,7 +286,8 @@ mod tests {
             22, 31, 89, 73, 11, 101, 75, 112, 96, 83, 47, 67, 8, 45, 33, 6,
         ];
 
-        let mut db = db_file::Reader::new(File::open("test_data/test.db").unwrap()).unwrap();
+        let mut db =
+            db_file::native::Reader::new(File::open("test_data/test.db").unwrap()).unwrap();
         let entry = db.entries().next().unwrap().unwrap();
 
         assert_eq!(entry.sequence.len(), SEQUENCE_LEN);
@@ -343,7 +344,8 @@ mod tests {
             31, 89, 73, 11, 101, 75, 112, 96, 83, 47, 67, 8, 45, 33, 6,
         ];
 
-        let mut db = db_file::Reader::new(File::open("test_data/test.db").unwrap()).unwrap();
+        let mut db =
+            db_file::native::Reader::new(File::open("test_data/test.db").unwrap()).unwrap();
         let entry = db.entries().next().unwrap().unwrap();
 
         assert_eq!(entry.sequence.len(), SEQUENCE_LEN);

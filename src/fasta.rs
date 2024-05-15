@@ -123,7 +123,7 @@ mod test {
     #[test]
     fn write_result() {
         let query = query_file::read_file(Path::new("./test_data/query.txt")).unwrap();
-        let db = db_file::read_file(Path::new("./test_data/test.db")).unwrap();
+        let db = db_file::read_db(Path::new("./test_data/test.db")).unwrap();
         let query_name = query[0].name().into();
         let db_name = db[0].name().to_owned();
 
@@ -157,7 +157,7 @@ mod test {
     fn write_result_rna() {
         let mut query = query_file::read_file(Path::new("./test_data/query.txt")).unwrap();
         query[0].molecule = Molecule::Rna;
-        let db = db_file::read_file(Path::new("./test_data/test.db")).unwrap();
+        let db = db_file::read_db(Path::new("./test_data/test.db")).unwrap();
         let query_name = query[0].name().into();
         let db_name = db[0].name().to_owned();
 
@@ -190,7 +190,7 @@ mod test {
     #[test]
     fn result_filename() {
         let query = query_file::read_file(Path::new("./test_data/query.txt")).unwrap();
-        let db = db_file::read_file(Path::new("./test_data/test.db")).unwrap();
+        let db = db_file::read_db(Path::new("./test_data/test.db")).unwrap();
         let query_name = query[0].name().into();
         let db_name = db[0].name().to_owned();
 
