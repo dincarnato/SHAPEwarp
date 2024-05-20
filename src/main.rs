@@ -27,6 +27,7 @@ use std::{
     num::ParseFloatError,
     ops::{self, Not, Range, RangeInclusive},
     path::{Path, PathBuf},
+    process,
     str::FromStr,
     sync::Arc,
 };
@@ -68,7 +69,7 @@ pub(crate) use crate::{
 };
 
 fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+    let cli = parse_cli_or_try_alternative()?;
 
     let Cli {
         overwrite,
@@ -173,6 +174,71 @@ fn main() -> anyhow::Result<()> {
         &db_entries_shuffled,
         &cli,
     )
+}
+
+fn parse_cli_or_try_alternative() -> anyhow::Result<Cli> {
+    let err = match Cli::try_parse() {
+        Ok(cli) => return Ok(cli),
+        Err(err) => err,
+    };
+
+    if err.kind() == clap::error::ErrorKind::MissingRequiredArgument
+        && err.context().any(|(kind, value)| {
+            kind == clap::error::ContextKind::InvalidArg
+                && matches!(
+                    value,
+                    clap::error::ContextValue::Strings(values)
+                    if values.len() == 1 && values[0] == "--query <QUERY>"
+                )
+        })
+    {
+        if let Ok(cli::Alternative {
+            database,
+            dump_db,
+            dump_shuffled_db,
+            threads,
+            db_shufflings,
+            db_block_size,
+            db_in_block_shuffle,
+        }) = cli::Alternative::try_parse()
+        {
+            println!("🪄 Entered in hidden mode to dump a DB 🪄");
+
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(threads.unwrap_or(0).into())
+                .build_global()
+                .context("Unable to create thread pool")?;
+
+            let db = db_file::read_db(&database).context("cannot read database")?;
+            let output = File::create(&dump_db).context("unable to open file to dump DB")?;
+            db_file::write_entries(&db, BufWriter::new(output))
+                .context("unable to dump DB to file")?;
+            println!("DB successfully dumped to {}.", dump_db.display());
+
+            if let Some(shuffled_db_output_path) = dump_shuffled_db {
+                let db_shuffled = make_shuffled_db(
+                    &db,
+                    db_block_size.into(),
+                    db_shufflings.into(),
+                    db_in_block_shuffle,
+                );
+
+                let shuffled_db_file = File::create(&shuffled_db_output_path)
+                    .context("unable to open output file for dumping shuffled db")?;
+                db_file::write_entries(&db_shuffled, BufWriter::new(shuffled_db_file))
+                    .context("unable to write shuffled db to file")?;
+                println!(
+                    "Shuffled DB successfully dumped to {}.",
+                    shuffled_db_output_path.display()
+                );
+            }
+
+            process::exit(0);
+        }
+    }
+
+    err.print()?;
+    process::exit(2);
 }
 
 fn run(

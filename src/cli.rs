@@ -389,3 +389,43 @@ impl Cli {
         Self::parse_from(["test", "--database", "test", "--query", "test"])
     }
 }
+
+/// Hidden dumper for XML files.
+///
+/// Read an XML or the XML files from a directory and dump the content to a native DB format.
+#[derive(Debug, Parser)]
+pub struct Alternative {
+    /// Path to a database folder generated with swBuildDb
+    #[clap(long, visible_alias = "db")]
+    pub database: PathBuf,
+
+    /// Dump the DB to the specified path.
+    ///
+    /// This can be useful to convert one or more XML files to the native format of DB.
+    #[clap(long)]
+    pub dump_db: PathBuf,
+
+    /// Dump the shuffled DB to the specified path.
+    ///
+    /// You can load the file for further analyses using the `--shuffled-db` parameter.
+    #[clap(long)]
+    pub dump_shuffled_db: Option<PathBuf>,
+
+    /// Number of processors to use
+    ///
+    /// Uses all available processors if not specified
+    #[clap(long)]
+    pub threads: Option<u16>,
+
+    /// Number of shufflings to perform for each sequence in db
+    #[clap(long, alias = "dbShufflings", default_value_t = 100)]
+    pub db_shufflings: u16,
+
+    /// Size (in nt) of the blocks for shuffling the sequences in db
+    #[clap(long, alias = "dbBlockSize", default_value_t = 10)]
+    pub db_block_size: u16,
+
+    /// Besides shuffling blocks, residues within each block in db will be shuffled as well
+    #[clap(long, alias = "dbInBlockShuffle")]
+    pub db_in_block_shuffle: bool,
+}
