@@ -33,6 +33,13 @@ pub struct Cli {
     #[serde(skip)]
     pub shuffled_db: Option<PathBuf>,
 
+    /// Dump the DB to the specified path.
+    ///
+    /// This can be useful to convert one or more XML files to the native format of DB.
+    #[clap(long)]
+    #[serde(skip)]
+    pub dump_db: Option<PathBuf>,
+
     /// Dump the shuffled DB to the specified path.
     ///
     /// You can load the file for further analyses using the `--shuffled-db` parameter.

@@ -106,6 +106,16 @@ fn main() -> anyhow::Result<()> {
     let query_entries_orig = query_file::read_file(&cli.query)?;
     let db_entries_orig = db_file::read_db(&cli.database)?;
 
+    if let Some(db_dump_path) = &cli.dump_db {
+        db_file::write_entries(
+            &db_entries_orig,
+            BufWriter::new(
+                File::create(db_dump_path).expect("unable to open output file for dumping db"),
+            ),
+        )
+        .expect("unable to write db to file");
+    }
+
     let query_entries: Vec<_> = query_entries_orig
         .iter()
         .map(|entry| {
