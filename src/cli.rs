@@ -12,15 +12,15 @@ use crate::{Distance, Reactivity};
 #[serde(rename_all = "kebab-case")]
 /// SHAPE-guided RNA structural homology search
 pub struct Cli {
-    /// Path to a database folder generated with swBuildDb
+    /// Path to a database file, or to a (directory of) XML file(s)
     #[clap(long, visible_alias = "db")]
     #[serde(skip)]
     pub database: PathBuf,
 
-    /// Path of the shuffled database.
+    /// Path to a shuffled database file
     ///
-    /// Use a file containing the shuffled db instead of the one generated on the fly. You can dump
-    /// a shuffled db using `--dump-shuffled-db` in order to reuse it later with this parameter.
+    /// Uses a file containing the shuffled database instead of generating one on the fly. 
+    /// A shuffled database can be dumped to file using `--dump-shuffled-db`.
     #[clap(
         long,
         conflicts_with_all = &[
@@ -33,16 +33,16 @@ pub struct Cli {
     #[serde(skip)]
     pub shuffled_db: Option<PathBuf>,
 
-    /// Dump the DB to the specified path.
+    /// Dumps the database to the specified file.
     ///
-    /// This can be useful to convert one or more XML files to the native format of DB.
+    /// Input is a (directory of) XML file(s).
     #[clap(long)]
     #[serde(skip)]
     pub dump_db: Option<PathBuf>,
 
-    /// Dump the shuffled DB to the specified path.
+    /// Dumps the shuffled database to the specified file.
     ///
-    /// You can load the file for further analyses using the `--shuffled-db` parameter.
+    /// Shuffled databases can be imported using the `--shuffled-db` parameter.
     #[clap(long)]
     #[serde(skip)]
     pub dump_shuffled_db: Option<PathBuf>,
@@ -102,14 +102,14 @@ pub struct Cli {
     #[clap(long, default_value_t = 0.1, aliases = &["reportEvalue", "repE"], visible_alias = "rep-e")]
     pub report_evalue: f64,
 
-    /// Reports sequence alignments in the specified format ([f]asta or [s]tockholm)
+    /// Reports sequence alignments in the specified format
     ///
     /// Note: alignments are reported only for matches below the inclusion E-value cutoff
     #[clap(long, alias = "reportAln", value_enum)]
     pub report_alignment: Option<ReportAlignment>,
 
-    /// Reports reactivity for sequence alignments in the "reactivities" folder inside the output
-    /// directory, using JSON format
+    /// Reports the aligned reactivities for significant matches in the "reactivities/" subfolder of the output
+    /// directory, in JSON format
     #[clap(long)]
     pub report_reactivity: bool,
 
@@ -123,7 +123,7 @@ pub struct Cli {
 
     #[clap(
         flatten,
-        next_help_heading = r#"Alignment folding evaluation options (see also "Folding options")"#
+        next_help_heading = r#"Alignment folding evaluation options"#
     )]
     #[serde(flatten)]
     pub alignment_folding_eval_args: AlignmentFoldingEvaluationArgs,
@@ -211,9 +211,9 @@ pub struct AlignmentArgs {
     #[clap(long, default_value_t = 8, alias = "alignMaxDropOffBases")]
     pub align_max_drop_off_bases: u16,
 
-    /// The maximum allowed tollerated length difference between the query and db sequences to look
+    /// The maximum allowed tolerated length difference between the query and db sequences to look
     /// for the ideal alignment along the diagonal (measured as a fraction of the length of the
-    /// shortest sequence between the db and the query)
+    /// shortest sequence among db and query)
     #[clap(long, default_value_t = 0.1, alias = "alignLenTolerance")]
     pub align_len_tolerance: f32,
 
@@ -395,19 +395,19 @@ impl Cli {
 /// Read an XML or the XML files from a directory and dump the content to a native DB format.
 #[derive(Debug, Parser)]
 pub struct Alternative {
-    /// Path to a database folder generated with swBuildDb
+    /// Path to a database file, or to a (directory of) XML file(s)
     #[clap(long, visible_alias = "db")]
     pub database: PathBuf,
 
-    /// Dump the DB to the specified path.
+    /// Dumps the database to the specified file.
     ///
-    /// This can be useful to convert one or more XML files to the native format of DB.
+    /// Input is a (directory of) XML file(s).
     #[clap(long)]
     pub dump_db: PathBuf,
 
-    /// Dump the shuffled DB to the specified path.
+    /// Dumps the shuffled database to the specified file.
     ///
-    /// You can load the file for further analyses using the `--shuffled-db` parameter.
+    /// Shuffled databases can be imported using the `--shuffled-db` parameter.
     #[clap(long)]
     pub dump_shuffled_db: Option<PathBuf>,
 

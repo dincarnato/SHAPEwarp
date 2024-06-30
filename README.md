@@ -40,8 +40,8 @@ Please see <http://www.gnu.org/licenses/> for more information.
 ## Installation
 
 ```bash
-$ git clone https://github.com/dincarnato/SHAPEwarp-devel
-$ cd SHAPEwarp-devel
+$ git clone https://github.com/dincarnato/SHAPEwarp
+$ cd SHAPEwarp
 
 # Add to PKG_CONFIG_PATH the path to the directory containing RNAlib2.pc from the ViennaRNA package
 $ export PKG_CONFIG_PATH=/path/to/dir/containing/RNAlib2.pc
