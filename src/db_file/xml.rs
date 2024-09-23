@@ -492,4 +492,19 @@ mod tests {
             "Saccharomyces.cerevisiae_rc:URS00005F2C2D_18S",
         );
     }
+
+    #[test]
+    fn read_directory_ignores_invalid_xml_files() {
+        let tempdir = tempdir().unwrap();
+        let temp_path = tempdir.path();
+        let xml_file_path = temp_path.join("test.xml");
+        fs::write(xml_file_path, "invalid xml").unwrap();
+        fs::copy(raw_xml_db_path(), temp_path.join("valid.xml")).unwrap();
+        let entries = read_directory(temp_path).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].id,
+            "Saccharomyces.cerevisiae_rc:URS00005F2C2D_18S",
+        );
+    }
 }
