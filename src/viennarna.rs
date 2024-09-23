@@ -1111,6 +1111,7 @@ impl fmt::Debug for FoldCompoundCommon<'_> {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct FoldCompoundCommonMut<'a> {
     pub type_: &'a mut vrna_fc_type_e,
     pub length: &'a mut c_uint,
