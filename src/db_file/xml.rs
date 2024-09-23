@@ -6,7 +6,7 @@ use std::{
     io::{self, BufReader},
     num::ParseFloatError,
     ops::Not,
-    path::{Path, PathBuf},
+    path::Path,
     str::Utf8Error,
 };
 
@@ -397,9 +397,22 @@ pub fn read_directory(path: &Path) -> Result<Vec<Entry>, ReadDirectoryError> {
                 .transpose()
         })
         .par_bridge()
-        .map(|path| {
-            let path = path.map_err(E::DirEntry)?;
-            read_file(&path).map_err(|source| E::Xml { path, source })
+        .filter_map(|path| {
+            let path = match path {
+                Ok(path) => path,
+                Err(err) => return Some(Err(E::DirEntry(err))),
+            };
+            match read_file(&path) {
+                Ok(entry) => Some(Ok(entry)),
+                Err(err) => {
+                    eprintln!(
+                        "WARNING: unable to read XML path {}: {:#}",
+                        path.display(),
+                        anyhow::Error::from(err)
+                    );
+                    None
+                }
+            }
         })
         .collect()
 }
@@ -408,10 +421,6 @@ pub fn read_directory(path: &Path) -> Result<Vec<Entry>, ReadDirectoryError> {
 pub enum ReadDirectoryError {
     Dir(io::Error),
     DirEntry(io::Error),
-    Xml {
-        path: PathBuf,
-        source: ReadFileError,
-    },
 }
 
 impl Display for ReadDirectoryError {
@@ -419,9 +428,6 @@ impl Display for ReadDirectoryError {
         match self {
             ReadDirectoryError::Dir(_) => f.write_str("unable to read directory"),
             ReadDirectoryError::DirEntry(_) => f.write_str("unable to read directory entry"),
-            ReadDirectoryError::Xml { path, source: _ } => {
-                write!(f, "unable to read XML path {}", path.display())
-            }
         }
     }
 }
@@ -430,7 +436,6 @@ impl StdError for ReadDirectoryError {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match self {
             ReadDirectoryError::Dir(source) | ReadDirectoryError::DirEntry(source) => Some(source),
-            ReadDirectoryError::Xml { source, .. } => Some(source),
         }
     }
 }
