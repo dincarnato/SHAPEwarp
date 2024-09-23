@@ -16,8 +16,8 @@ use crate::{
     norm_dist::NormDist,
     null_model::ExtremeDistribution,
     query_aligner::{align_query_to_target_db, QueryAlignResult},
-    query_file, reuse_vec, AlifoldOnResult, HandlerData, MutableHandlerData, QueryResult,
-    QueryResultRange, QueryResultStatus, SequenceEntry, SharedHandlerData,
+    query_file, query_result, reuse_vec, AlifoldOnResult, HandlerData, MutableHandlerData,
+    QueryResult, SequenceEntry, SharedHandlerData,
 };
 
 pub(super) fn handle_query_entry<'a>(
@@ -173,11 +173,11 @@ impl<'a> QueryResultHandler<'a> {
         exp_value: f64,
     ) -> QueryResult {
         let mut status = if exp_value > self.cli.report_evalue {
-            QueryResultStatus::NotPass
+            query_result::Status::NotPass
         } else if exp_value > self.cli.inclusion_evalue {
-            QueryResultStatus::PassReportEvalue
+            query_result::Status::PassReportEvalue
         } else {
-            QueryResultStatus::PassInclusionEvalue
+            query_result::Status::PassInclusionEvalue
         };
 
         let (mfe_pvalue_dotbracket, bp_support) = self.get_mfe_data(result, &mut status);
@@ -196,8 +196,8 @@ impl<'a> QueryResultHandler<'a> {
         let query = Arc::clone(&self.query);
         let alignment = Arc::clone(alignment);
 
-        let query_seed = QueryResultRange(db_match.query.clone());
-        let db_seed = QueryResultRange(db_match.db.clone());
+        let query_seed = query_result::Range(db_match.query.clone());
+        let db_seed = query_result::Range(db_match.db.clone());
         let query_start = *query_range.start();
         let query_end = *query_range.end();
         let db_start = *db_range.start();
@@ -237,7 +237,7 @@ impl<'a> QueryResultHandler<'a> {
     fn get_mfe_data(
         &mut self,
         result: &QueryAlignResult<AlignedSequence>,
-        status: &mut QueryResultStatus,
+        status: &mut query_result::Status,
     ) -> (MfeResult, Option<BpSupport>) {
         let &mut Self {
             ref mut query_entry,
@@ -251,7 +251,7 @@ impl<'a> QueryResultHandler<'a> {
         } = self;
 
         if cli.alignment_folding_eval_args.eval_align_fold.not()
-            || matches!(status, QueryResultStatus::PassInclusionEvalue).not()
+            || matches!(status, query_result::Status::PassInclusionEvalue).not()
         {
             return (MfeResult::Unevaluated, None);
         }
@@ -278,7 +278,7 @@ impl<'a> QueryResultHandler<'a> {
         };
 
         if ignore {
-            *status = QueryResultStatus::PassReportEvalue;
+            *status = query_result::Status::PassReportEvalue;
             return (MfeResult::Unevaluated, Some(bp_support));
         }
 

@@ -15,6 +15,7 @@ mod norm_dist;
 mod null_model;
 mod query_aligner;
 mod query_file;
+mod query_result;
 mod stockholm;
 mod viennarna;
 
@@ -25,19 +26,18 @@ use std::{
     io::{self, BufWriter},
     iter::Sum,
     num::ParseFloatError,
-    ops::{self, Not, Range, RangeInclusive},
+    ops::{Not, Range, RangeInclusive},
     path::{Path, PathBuf},
     process,
     str::FromStr,
-    sync::Arc,
 };
 
-use aligner::{trimmed_range, AlignedSequence, Aligner, AlignmentResult};
+use aligner::{trimmed_range, AlignedSequence, Aligner};
 use anyhow::{bail, Context};
 use clap::Parser;
 use cli::MinMax;
 use db_file::{ReactivityLike, ReactivityWithPlaceholder};
-use dotbracket::{DotBracketBuffered, DotBracketOwnedSorted};
+use dotbracket::DotBracketBuffered;
 use fftw::{
     array::AlignedVec,
     plan::{C2CPlan, C2CPlan32, C2CPlan64},
@@ -51,10 +51,11 @@ use null_model::make_shuffled_db;
 use num_complex::Complex;
 use num_traits::{cast, float::FloatCore, Float, FromPrimitive, NumAssignRef, NumRef, RefNum};
 use query_aligner::QueryAlignResult;
+use query_result::QueryResult;
 use rayon::prelude::*;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::Serialize;
 use smallvec::SmallVec;
-use tabled::{Table, Tabled};
+use tabled::Table;
 use viennarna::Structure;
 
 use crate::{
@@ -370,7 +371,7 @@ fn handle_report_alignment(
 
     let mut results = results
         .iter()
-        .filter(|result| matches!(result.status, QueryResultStatus::PassInclusionEvalue));
+        .filter(|result| matches!(result.status, query_result::Status::PassInclusionEvalue));
     match report_alignment {
         ReportAlignment::Fasta => {
             results
@@ -445,166 +446,6 @@ fn reuse_vec<T, U>(mut v: Vec<T>) -> Vec<U> {
     assert_eq!(std::mem::align_of::<T>(), std::mem::align_of::<U>());
     v.clear();
     v.into_iter().map(|_| unreachable!()).collect()
-}
-
-#[derive(Debug, Deserialize, Serialize, Tabled)]
-struct QueryResult {
-    #[serde(rename = "Query")]
-    query: Arc<str>,
-
-    #[serde(rename = "DB entry")]
-    db_entry: String,
-
-    #[serde(rename = "Qstart")]
-    query_start: usize,
-
-    #[serde(rename = "Qend")]
-    query_end: usize,
-
-    #[serde(rename = "Dstart")]
-    db_start: usize,
-
-    #[serde(rename = "Dend")]
-    db_end: usize,
-
-    #[serde(rename = "Qseed")]
-    query_seed: QueryResultRange,
-
-    #[serde(rename = "Dseed")]
-    db_seed: QueryResultRange,
-
-    #[serde(rename = "Score")]
-    score: f32,
-
-    #[serde(rename = "P-value")]
-    #[tabled(display_with = "display_scientific")]
-    pvalue: f64,
-
-    #[serde(rename = "E-value")]
-    #[tabled(display_with = "display_scientific")]
-    evalue: f64,
-
-    #[serde(rename = "TargetBpSupport")]
-    #[tabled(display_with = "display_scientific_opt")]
-    target_bp_support: Option<f32>,
-
-    #[serde(rename = "QueryBpSupport")]
-    #[tabled(display_with = "display_scientific_opt")]
-    query_bp_support: Option<f32>,
-
-    #[serde(rename = "MfePvalue")]
-    #[tabled(display_with = "display_scientific_opt")]
-    mfe_pvalue: Option<f64>,
-
-    #[serde(rename = "")]
-    status: QueryResultStatus,
-
-    #[serde(skip)]
-    #[tabled(skip)]
-    alignment: Arc<AlignmentResult<AlignedSequence>>,
-
-    #[serde(skip)]
-    #[tabled(skip)]
-    dotbracket: Option<DotBracketOwnedSorted>,
-}
-
-impl QueryResult {
-    fn new(query: impl Into<Arc<str>>) -> Self {
-        let query = query.into();
-        Self {
-            query,
-            db_entry: String::default(),
-            query_start: Default::default(),
-            query_end: Default::default(),
-            db_start: Default::default(),
-            db_end: Default::default(),
-            query_seed: QueryResultRange::default(),
-            db_seed: QueryResultRange::default(),
-            score: Default::default(),
-            pvalue: Default::default(),
-            evalue: Default::default(),
-            status: QueryResultStatus::default(),
-            target_bp_support: Option::default(),
-            query_bp_support: Option::default(),
-            mfe_pvalue: Option::default(),
-            alignment: Arc::default(),
-            dotbracket: Option::default(),
-        }
-    }
-}
-
-#[derive(Debug)]
-struct QueryResultRange(ops::RangeInclusive<usize>);
-
-impl Default for QueryResultRange {
-    fn default() -> Self {
-        Self(0..=0)
-    }
-}
-
-impl Serialize for QueryResultRange {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.collect_str(self)
-    }
-}
-
-impl<'de> Deserialize<'de> for QueryResultRange {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        use serde::de::Error;
-
-        let raw = <&str>::deserialize(deserializer)?;
-        let mut split = raw.split('-').map(str::parse);
-        let start = split
-            .next()
-            .ok_or_else(|| Error::custom("missing start in range"))?
-            .map_err(|_| Error::custom("invalid start in range"))?;
-
-        let end = split
-            .next()
-            .ok_or_else(|| Error::custom("missing end in range"))?
-            .map_err(|_| Error::custom("invalid end in range"))?;
-
-        if split.next().is_some() {
-            return Err(Error::custom("invalid range format"));
-        }
-
-        Ok(Self(start..=end))
-    }
-}
-
-impl fmt::Display for QueryResultRange {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}-{}", self.0.start(), self.0.end())
-    }
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-enum QueryResultStatus {
-    #[serde(rename = "!")]
-    PassInclusionEvalue,
-
-    #[serde(rename = "?")]
-    PassReportEvalue,
-
-    #[default]
-    #[serde(rename = "")]
-    NotPass,
-}
-
-impl fmt::Display for QueryResultStatus {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::PassInclusionEvalue => f.write_str("!"),
-            Self::PassReportEvalue => f.write_str("?"),
-            Self::NotPass => f.write_str(""),
-        }
-    }
 }
 
 pub(crate) type Reactivity = f32;
@@ -1336,24 +1177,6 @@ fn create_csv_from_writer<W: io::Write>(writer: W) -> csv::Writer<W> {
         .from_writer(writer)
 }
 
-fn display_scientific<T>(x: &T) -> String
-where
-    T: Float + FromPrimitive + Display + fmt::LowerExp,
-{
-    if *x >= T::from_f32(0.1).unwrap() {
-        format!("{x:.3}")
-    } else {
-        format!("{x:.3e}")
-    }
-}
-
-fn display_scientific_opt<T>(x: &Option<T>) -> String
-where
-    T: Float + FromPrimitive + Display + fmt::LowerExp,
-{
-    x.as_ref().map(display_scientific).unwrap_or_default()
-}
-
 struct ResultFileFormat<'a> {
     db_name: &'a str,
     db_range: RangeInclusive<usize>,
@@ -1433,7 +1256,7 @@ fn write_results_reactivity(
 
     let mut iter = results
         .iter()
-        .filter(|result| matches!(result.status, QueryResultStatus::PassInclusionEvalue))
+        .filter(|result| matches!(result.status, query_result::Status::PassInclusionEvalue))
         .map(|result| {
             let query_entry = query_entries
                 .iter()

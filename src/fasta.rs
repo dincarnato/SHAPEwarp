@@ -116,7 +116,7 @@ fn write_result_to_writer<W: io::Write>(
 mod test {
     use std::sync::Arc;
 
-    use crate::{aligner::BaseOrGap, Molecule, QueryResultRange, QueryResultStatus};
+    use crate::{aligner::BaseOrGap, query_result, Molecule};
 
     use super::*;
 
@@ -134,15 +134,15 @@ mod test {
             query_end: 10,
             db_start: 15,
             db_end: 20,
-            query_seed: QueryResultRange(0..=10),
-            db_seed: QueryResultRange(0..=10),
+            query_seed: query_result::Range(0..=10),
+            db_seed: query_result::Range(0..=10),
             score: 0.,
             pvalue: 0.,
             evalue: 0.,
             target_bp_support: Option::default(),
             query_bp_support: Option::default(),
             mfe_pvalue: Option::default(),
-            status: QueryResultStatus::PassInclusionEvalue,
+            status: query_result::Status::PassInclusionEvalue,
             alignment: Arc::default(),
             dotbracket: Option::default(),
         };
@@ -168,15 +168,15 @@ mod test {
             query_end: 10,
             db_start: 15,
             db_end: 20,
-            query_seed: QueryResultRange(0..=10),
-            db_seed: QueryResultRange(0..=10),
+            query_seed: query_result::Range(0..=10),
+            db_seed: query_result::Range(0..=10),
             score: 0.,
             pvalue: 0.,
             evalue: 0.,
             target_bp_support: Option::default(),
             query_bp_support: Option::default(),
             mfe_pvalue: Option::default(),
-            status: QueryResultStatus::PassInclusionEvalue,
+            status: query_result::Status::PassInclusionEvalue,
             alignment: Arc::default(),
             dotbracket: Option::default(),
         };
@@ -201,15 +201,15 @@ mod test {
             query_end: 10,
             db_start: 15,
             db_end: 20,
-            query_seed: QueryResultRange(0..=10),
-            db_seed: QueryResultRange(0..=10),
+            query_seed: query_result::Range(0..=10),
+            db_seed: query_result::Range(0..=10),
             score: 0.,
             pvalue: 0.,
             evalue: 0.,
             target_bp_support: Option::default(),
             query_bp_support: Option::default(),
             mfe_pvalue: Option::default(),
-            status: QueryResultStatus::PassInclusionEvalue,
+            status: query_result::Status::PassInclusionEvalue,
             alignment: Arc::default(),
             dotbracket: Option::default(),
         };
