@@ -1803,21 +1803,21 @@ mod tests {
 
     #[test]
     fn trimmed_range_start() {
-        use std::f32::NAN;
+        const NAN: f32 = f32::NAN;
         let data = [NAN, NAN, 1., NAN, 3., 4., 5.];
         assert_eq!(trimmed_range(&data), 2..7);
     }
 
     #[test]
     fn trimmed_range_end() {
-        use std::f32::NAN;
+        const NAN: f32 = f32::NAN;
         let data = [1., NAN, 3., 4., 5., NAN, NAN];
         assert_eq!(trimmed_range(&data), 0..5);
     }
 
     #[test]
     fn trimmed_range_both() {
-        use std::f32::NAN;
+        const NAN: f32 = f32::NAN;
         let data = [NAN, NAN, NAN, 1., NAN, 3., 4., 5., NAN, NAN];
         assert_eq!(trimmed_range(&data), 3..8);
     }

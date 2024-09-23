@@ -2883,7 +2883,7 @@ mod tests {
     }
 
     const QUERY2: [f32; 200] = {
-        use std::f32::NAN;
+        const NAN: f32 = f32::NAN;
         [
             0.885, 0.181, 0.189, 0.239, 0.531, 0.141, 0.126, 0.491, 0.648, 0.114, 0.171, 0.332,
             0.099, 0.601, 0.849, 1.000, 0.928, 0.221, 0.464, 0.482, 0.398, 0.082, 0.079, 0.141,
@@ -3146,8 +3146,9 @@ mod tests {
 
     #[test]
     fn serialize_gapped_reactivity() {
-        use std::f64::NAN;
         use BaseOrGap::*;
+
+        const NAN: f64 = f64::NAN;
 
         fn check(reactivity: &[f32], alignment: AlignedSequenceRef<'_>, expected: &[f64]) {
             let values = serde_json::to_value(GappedReactivity {
