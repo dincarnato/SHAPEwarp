@@ -457,7 +457,7 @@ mod tests {
 
     #[test]
     fn read_valid_xml() {
-        let entry = read_file(dbg!(raw_xml_db_path())).unwrap();
+        let entry = read_file(raw_xml_db_path()).unwrap();
         assert_eq!(entry.id, "Saccharomyces.cerevisiae_rc:URS00005F2C2D_18S");
         assert_eq!(entry.sequence.len(), 1800);
         assert_eq!(

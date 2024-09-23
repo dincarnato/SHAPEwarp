@@ -432,7 +432,6 @@ mod tests {
             .iter_mut()
             .for_each(|entry| entry.cap_reactivities(1.));
 
-        dbg!(&entries);
         assert!(reactivities_eq(
             entries[0].reactivities.iter().copied(),
             [0.123, 0.456, 0.789, 1., Reactivity::NAN]
