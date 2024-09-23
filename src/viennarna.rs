@@ -18,7 +18,7 @@ use viennarna_mfe_sys::{
     vrna_fc_type_e_VRNA_FC_TYPE_COMPARATIVE, vrna_fc_type_e_VRNA_FC_TYPE_SINGLE,
     vrna_fold_compound_comparative, vrna_fold_compound_free, vrna_fold_compound_t, vrna_gr_aux_t,
     vrna_hc_depot_t, vrna_hc_t, vrna_hc_type_e_VRNA_HC_DEFAULT, vrna_hc_type_e_VRNA_HC_WINDOW,
-    vrna_md_set_default, vrna_md_t, vrna_mfe, vrna_msa_t, vrna_mx_mfe_t, vrna_mx_pf_t,
+    vrna_md_s, vrna_md_set_default, vrna_md_t, vrna_mfe, vrna_msa_t, vrna_mx_mfe_t, vrna_mx_pf_t,
     vrna_param_t, vrna_sc_bp_storage_t, vrna_sc_init, vrna_sc_s, vrna_sc_set_stack_comparative,
     vrna_sc_type_e_VRNA_SC_DEFAULT, vrna_sc_type_e_VRNA_SC_WINDOW, vrna_sd_t, vrna_seq_t,
     vrna_seq_type_e_VRNA_SEQ_DNA, vrna_seq_type_e_VRNA_SEQ_RNA, vrna_seq_type_e_VRNA_SEQ_UNKNOWN,
@@ -194,7 +194,7 @@ impl FoldCompound {
         let pointer = unsafe {
             vrna_fold_compound_comparative(
                 sequences.as_slice().as_ptr().cast_mut(),
-                mem::transmute(model_details),
+                mem::transmute::<Option<&ModelDetails>, *mut vrna_md_s>(model_details),
                 options.bits(),
             )
         };
