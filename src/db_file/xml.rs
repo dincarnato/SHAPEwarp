@@ -438,13 +438,16 @@ impl StdError for ReadDirectoryError {
 #[cfg(test)]
 mod tests {
     use std::{
+        fs,
         path::{Path, PathBuf},
         sync::OnceLock,
     };
 
+    use tempfile::tempdir;
+
     use crate::{db_file::ReactivityWithPlaceholder, Base};
 
-    use super::read_file;
+    use super::{read_directory, read_file};
 
     fn raw_xml_db_path() -> &'static Path {
         static RAW_XML_DB_PATH: OnceLock<PathBuf> = OnceLock::new();
@@ -469,5 +472,19 @@ mod tests {
             .copied()
             .all(ReactivityWithPlaceholder::is_nan));
         assert!((entry.reactivity[37].get_non_nan().unwrap() - 0.389).abs() < 0.001);
+    }
+
+    #[test]
+    fn read_directory_ignores_non_xml_files() {
+        let tempdir = tempdir().unwrap();
+        let temp_path = tempdir.path();
+        fs::write(temp_path.join("test.txt"), "hello world").unwrap();
+        fs::copy(raw_xml_db_path(), temp_path.join("valid.xml")).unwrap();
+        let entries = read_directory(temp_path).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].id,
+            "Saccharomyces.cerevisiae_rc:URS00005F2C2D_18S",
+        );
     }
 }
