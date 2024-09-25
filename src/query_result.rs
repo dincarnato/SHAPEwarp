@@ -5,7 +5,7 @@ use std::{
 };
 
 use num_traits::{Float, FromPrimitive};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer};
 use tabled::Tabled;
 
 use crate::{
@@ -96,6 +96,53 @@ impl QueryResult {
             alignment: Arc::default(),
             dotbracket: Option::default(),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct Serializeable<'a> {
+    pub query_result: &'a QueryResult,
+    pub eval_align_fold: bool,
+}
+
+impl serde::Serialize for Serializeable<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let fields_count = if self.eval_align_fold { 15 } else { 12 };
+        let mut struc = serializer.serialize_struct("QueryResult", fields_count)?;
+
+        let query_result = self.query_result;
+        struc.serialize_field("Query", &query_result.query)?;
+        struc.serialize_field("DB field", &query_result.db_entry)?;
+        struc.serialize_field("Qstart", &query_result.query_start)?;
+        struc.serialize_field("Qend", &query_result.query_end)?;
+        struc.serialize_field("Dstart", &query_result.db_start)?;
+        struc.serialize_field("Dend", &query_result.db_end)?;
+        struc.serialize_field("Qseed", &query_result.query_seed)?;
+        struc.serialize_field("Dseed", &query_result.db_seed)?;
+        struc.serialize_field("Score", &query_result.score)?;
+        struc.serialize_field("P-value", &display_scientific(&query_result.pvalue))?;
+        struc.serialize_field("E-value", &display_scientific(&query_result.evalue))?;
+
+        if self.eval_align_fold {
+            struc.serialize_field(
+                "TargetBpSupport",
+                &display_scientific_opt(&query_result.target_bp_support),
+            )?;
+            struc.serialize_field(
+                "QueryBpSupport",
+                &display_scientific_opt(&query_result.query_bp_support),
+            )?;
+            struc.serialize_field(
+                "MfePvalue",
+                &display_scientific_opt(&query_result.mfe_pvalue),
+            )?;
+        }
+
+        struc.serialize_field("", &query_result.status)?;
+        struc.end()
     }
 }
 

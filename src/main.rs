@@ -35,7 +35,7 @@ use std::{
 use aligner::{trimmed_range, AlignedSequence, Aligner};
 use anyhow::{bail, Context};
 use clap::Parser;
-use cli::MinMax;
+use cli::{AlignmentFoldingEvaluationArgs, MinMax};
 use db_file::{ReactivityLike, ReactivityWithPlaceholder};
 use dotbracket::DotBracketBuffered;
 use fftw::{
@@ -257,8 +257,6 @@ fn run(
         ..
     } = cli;
 
-    let results_path = output.join("results.out");
-
     let mut results = query_entries
         .par_iter()
         .zip(query_entries_orig)
@@ -299,32 +297,7 @@ fn run(
             .then_with(|| a.db_start.cmp(&b.db_start))
     });
 
-    let mut results_writer = {
-        let file = File::create(results_path).context("Unable to create results.out file")?;
-        create_csv_from_writer(file)
-    };
-    if results.is_empty() {
-        // This is a dirty workaround to make csv write the header
-        use std::io::Write;
-
-        let mut tmp_data = Vec::new();
-        create_csv_from_writer(&mut tmp_data).serialize(QueryResult::new(""))?;
-        let header = tmp_data
-            .splitn(2, |&c| c == b'\n')
-            .next()
-            .expect("CSV should have written at least one line");
-        let mut results_writer = results_writer.into_inner()?;
-        results_writer.write_all(header)?;
-    } else {
-        results
-            .iter()
-            .try_for_each(|result| results_writer.serialize(result))
-            .context("Unable to write to results.out file")?;
-
-        results_writer
-            .flush()
-            .context("Unable to flush results.out file")?;
-    }
+    write_csv(&results, cli)?;
 
     if let Some(report_alignment) = report_alignment {
         handle_report_alignment(
@@ -356,6 +329,56 @@ fn run(
         println!("{table}");
     }
 
+    Ok(())
+}
+
+fn write_csv(results: &[QueryResult], cli: &Cli) -> anyhow::Result<()> {
+    let &Cli {
+        ref output,
+        alignment_folding_eval_args:
+            AlignmentFoldingEvaluationArgs {
+                eval_align_fold, ..
+            },
+        ..
+    } = cli;
+
+    let results_path = output.join("results.out");
+
+    let mut results_writer = {
+        let file = File::create(results_path).context("Unable to create results.out file")?;
+        create_csv_from_writer(file)
+    };
+
+    if results.is_empty() {
+        // This is a dirty workaround to make csv write the header
+        use std::io::Write;
+
+        let mut tmp_data = Vec::new();
+        create_csv_from_writer(&mut tmp_data).serialize(query_result::Serializeable {
+            query_result: &QueryResult::new(""),
+            eval_align_fold,
+        })?;
+        let header = tmp_data
+            .splitn(2, |&c| c == b'\n')
+            .next()
+            .expect("CSV should have written at least one line");
+        let mut results_writer = results_writer.into_inner()?;
+        results_writer.write_all(header)?;
+    } else {
+        results
+            .iter()
+            .try_for_each(|result| {
+                results_writer.serialize(query_result::Serializeable {
+                    query_result: result,
+                    eval_align_fold,
+                })
+            })
+            .context("Unable to write to results.out file")?;
+
+        results_writer
+            .flush()
+            .context("Unable to flush results.out file")?;
+    }
     Ok(())
 }
 
