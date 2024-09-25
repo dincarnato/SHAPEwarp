@@ -106,9 +106,10 @@ pub(super) fn handle_query_entry<'a>(
     // In case of precision loss, it is still ok to evaluate the e_value
     #[allow(clippy::cast_precision_loss)]
     let results_len = query_results.len() as f64;
+    let report_evalue = cli.report_evalue.max(cli.inclusion_evalue);
     query_results.retain_mut(|(_, p_value, e_value)| {
         *e_value = *p_value * results_len;
-        *e_value <= cli.report_evalue
+        *e_value <= report_evalue
     });
     remove_overlapping_results(&mut query_results, &mut index_to_remove, cli);
 
