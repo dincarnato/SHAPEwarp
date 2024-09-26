@@ -19,13 +19,13 @@ pub struct Cli {
 
     /// Path to a shuffled database file
     ///
-    /// Uses a file containing the shuffled database instead of generating one on the fly. 
+    /// Uses a file containing the shuffled database instead of generating one on the fly.
     /// A shuffled database can be dumped to file using `--dump-shuffled-db`.
     #[clap(
         long,
         conflicts_with_all = &[
             "dump_shuffled_db",
-            "db_shufflings",
+            "db_shuffles",
             "db_block_size",
             "db_in_block_shuffle",
         ],
@@ -69,9 +69,9 @@ pub struct Cli {
     #[clap(long)]
     pub threads: Option<u16>,
 
-    /// Number of shufflings to perform for each sequence in db
-    #[clap(long, alias = "dbShufflings", default_value_t = 100)]
-    pub db_shufflings: u16,
+    /// Number of shuffles to perform for each sequence in db
+    #[clap(long, alias = "dbShuffles", default_value_t = 100)]
+    pub db_shuffles: u16,
 
     /// Size (in nt) of the blocks for shuffling the sequences in db
     #[clap(long, alias = "dbBlockSize", default_value_t = 10)]
@@ -121,10 +121,7 @@ pub struct Cli {
     #[serde(flatten)]
     pub alignment_args: AlignmentArgs,
 
-    #[clap(
-        flatten,
-        next_help_heading = r#"Alignment folding evaluation options"#
-    )]
+    #[clap(flatten, next_help_heading = r#"Alignment folding evaluation options"#)]
     #[serde(flatten)]
     pub alignment_folding_eval_args: AlignmentFoldingEvaluationArgs,
 }
@@ -248,9 +245,9 @@ pub struct AlignmentFoldingEvaluationArgs {
     #[clap(long, alias = "evalAlignFold")]
     pub eval_align_fold: bool,
 
-    /// Number of shufflings to perform for each alignment during folding evaluation
+    /// Number of shuffles to perform for each alignment during folding evaluation
     #[clap(long, default_value_t = 100)]
-    pub shufflings: u16,
+    pub shuffles: u16,
 
     /// Size (in nt) of the blocks for shuffling the alignment during folding evaluation
     #[clap(long, alias = "blockSize", default_value_t = 3)]
@@ -417,9 +414,9 @@ pub struct Alternative {
     #[clap(long)]
     pub threads: Option<u16>,
 
-    /// Number of shufflings to perform for each sequence in db
-    #[clap(long, alias = "dbShufflings", default_value_t = 100)]
-    pub db_shufflings: u16,
+    /// Number of shuffles to perform for each sequence in db
+    #[clap(long, alias = "dbShuffles", default_value_t = 100)]
+    pub db_shuffles: u16,
 
     /// Size (in nt) of the blocks for shuffling the sequences in db
     #[clap(long, alias = "dbBlockSize", default_value_t = 10)]
