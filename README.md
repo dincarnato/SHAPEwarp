@@ -62,7 +62,7 @@ To compile SHAPEwarp on Mac OS X, after having installed the ViennaRNA package, 
 To test SHAPEwarp on a small test dataset, issue the following command from within the SHAPEwarp install directory:
 
 ```bash
-target/release/shapewarp --query test_data/query.txt --database test_data/test.db --output test_out --ow
+target/release/SHAPEwarp --query test_data/query.txt --database test_data/test.db --output test_out --ow
 ```
 The search will take less than 10 seconds, and the expected output should look like the following:
 
