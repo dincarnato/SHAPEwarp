@@ -45,7 +45,6 @@ use fftw::{
 };
 use fnv::FnvHashMap;
 use gapped_data::GappedData;
-use itertools::Itertools;
 use mass::{ComplexExt, Mass};
 use null_model::make_shuffled_db;
 use num_complex::Complex;
@@ -757,7 +756,7 @@ fn transform_db(
 
 #[derive(Debug)]
 pub enum Error {
-    CreateMass(fftw::error::Error),
+    CreateMass(Option<fftw::error::Error>),
     RunMass(fftw::error::Error),
     Io(std::io::Error),
     Reader(db_file::ReaderError),
@@ -779,7 +778,8 @@ impl Display for Error {
 impl StdError for Error {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match self {
-            Error::CreateMass(source) | Error::RunMass(source) => Some(source),
+            Error::CreateMass(source) => source.as_ref().map(|source| source as &dyn StdError),
+            Error::RunMass(source) => Some(source),
             Error::Io(source) => Some(source),
             Error::Reader(source) => Some(source),
             Error::ReaderEntry(source) => Some(source),
@@ -831,7 +831,6 @@ fn get_matching_kmers(
         kmer_max_match_every_nt,
         max_sequence_distance,
     };
-    let mut mass = Mass::new(db_data.reactivity.len()).map_err(Error::CreateMass)?;
 
     let kmer_len_usize = kmer_len.into();
     let last_kmer_index = trimmed_query_range.end.saturating_sub(kmer_len_usize);
@@ -846,12 +845,24 @@ fn get_matching_kmers(
         .filter(|(_, (kmer, _))| {
             gini_index(ReactivityWithPlaceholder::as_inner_slice(kmer)) >= kmer_min_complexity
         })
-        .map(|(kmer_index, (kmer, kmer_sequence))| {
-            query_match_handler.run(kmer_index, kmer, kmer_sequence, &mut mass)
+        .par_bridge()
+        .map_init(
+            || Mass::new(db_data.reactivity.len()).map_err(Some),
+            |mass, (kmer_index, (kmer, kmer_sequence))| match mass {
+                Ok(mass) => query_match_handler
+                    .run(kmer_index, kmer, kmer_sequence, mass)
+                    .map_err(Error::RunMass),
+                Err(err) => Err(Error::CreateMass(err.take())),
+            },
+        )
+        .flat_map_iter(|result| {
+            let mut result = result.map_err(Some);
+            std::iter::from_fn(move || match &mut result {
+                Ok(iter) => iter.next().map(Ok),
+                Err(err) => err.take().map(Err),
+            })
         })
-        .flatten_ok()
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(Error::RunMass)?;
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(matches)
 }
