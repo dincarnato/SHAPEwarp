@@ -291,8 +291,8 @@ impl<'a> QueryResultHandler<'a> {
 
         let block_size = cli.alignment_folding_eval_args.block_size;
         null_model_energies.clear();
-        null_model_energies.extend((0..cli.alignment_folding_eval_args.shufflings).map(
-            move |_| match &mut block_indices_buffer {
+        null_model_energies.extend((0..cli.alignment_folding_eval_args.shuffles).map(move |_| {
+            match &mut block_indices_buffer {
                 Some(block_indices_buffer) => {
                     let gapped_data = gapped_data.clone().shuffled_in_blocks(
                         block_size,
@@ -318,8 +318,8 @@ impl<'a> QueryResultHandler<'a> {
 
                     mfe
                 }
-            },
-        ));
+            }
+        }));
         let dist = NormDist::from_sample(null_model_energies.as_slice());
         let z_score = dist.z_score(mfe);
 

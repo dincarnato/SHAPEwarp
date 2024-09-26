@@ -75,7 +75,7 @@ fn main() -> anyhow::Result<()> {
         overwrite,
         ref output,
         threads,
-        db_shufflings,
+        db_shuffles,
         db_block_size,
         ..
     } = cli;
@@ -150,7 +150,7 @@ fn main() -> anyhow::Result<()> {
             make_shuffled_db(
                 &db_entries,
                 db_block_size.into(),
-                db_shufflings.into(),
+                db_shuffles.into(),
                 cli.db_in_block_shuffle,
             )
         });
@@ -197,7 +197,7 @@ fn parse_cli_or_try_alternative() -> anyhow::Result<Cli> {
             dump_db,
             dump_shuffled_db,
             threads,
-            db_shufflings,
+            db_shuffles,
             db_block_size,
             db_in_block_shuffle,
         }) = cli::Alternative::try_parse()
@@ -219,7 +219,7 @@ fn parse_cli_or_try_alternative() -> anyhow::Result<Cli> {
                 let db_shuffled = make_shuffled_db(
                     &db,
                     db_block_size.into(),
-                    db_shufflings.into(),
+                    db_shuffles.into(),
                     db_in_block_shuffle,
                 );
 
