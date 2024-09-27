@@ -216,7 +216,7 @@ fn parse_cli_or_try_alternative() -> anyhow::Result<Cli> {
             println!("DB successfully dumped to {}.", dump_db.display());
 
             if let Some(shuffled_db_output_path) = dump_shuffled_db {
-                let db_shuffled = make_shuffled_db(
+                let shuffled_db = make_shuffled_db(
                     &db,
                     db_block_size.into(),
                     db_shuffles.into(),
@@ -225,7 +225,7 @@ fn parse_cli_or_try_alternative() -> anyhow::Result<Cli> {
 
                 let shuffled_db_file = File::create(&shuffled_db_output_path)
                     .context("unable to open output file for dumping shuffled db")?;
-                db_file::write_entries(&db_shuffled, BufWriter::new(shuffled_db_file))
+                db_file::write_entries(&shuffled_db, BufWriter::new(shuffled_db_file))
                     .context("unable to write shuffled db to file")?;
                 println!(
                     "Shuffled DB successfully dumped to {}.",
