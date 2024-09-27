@@ -70,8 +70,14 @@ pub struct Cli {
     pub threads: Option<u16>,
 
     /// Number of shuffles to perform for each sequence in db
-    #[clap(long, alias = "dbShuffles", default_value_t = 100)]
-    pub db_shuffles: u16,
+    ///
+    /// In case the parameter is unspecified, it is automatically evaluated based on the length of
+    /// the sequences in the database.
+    ///
+    /// Given `L` as the sum of the lengths of each sequence in the database, the number of
+    /// shuffles is calculated as `max(1, 500000 / L)`.
+    #[clap(long, alias = "dbShuffles")]
+    pub db_shuffles: Option<u16>,
 
     /// Size (in nt) of the blocks for shuffling the sequences in db
     #[clap(long, alias = "dbBlockSize", default_value_t = 10)]
@@ -415,8 +421,14 @@ pub struct Alternative {
     pub threads: Option<u16>,
 
     /// Number of shuffles to perform for each sequence in db
-    #[clap(long, alias = "dbShuffles", default_value_t = 100)]
-    pub db_shuffles: u16,
+    ///
+    /// In case the parameter is unspecified, it is automatically evaluated based on the length of
+    /// the sequences in the database.
+    ///
+    /// Given `L` as the sum of the lengths of each sequence in the database, the number of
+    /// shuffles is calculated as `max(1, 500000 / L)`.
+    #[clap(long, alias = "dbShuffles")]
+    pub db_shuffles: Option<u16>,
 
     /// Size (in nt) of the blocks for shuffling the sequences in db
     #[clap(long, alias = "dbBlockSize", default_value_t = 10)]

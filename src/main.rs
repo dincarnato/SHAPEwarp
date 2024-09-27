@@ -25,8 +25,8 @@ use std::{
     fs::{self, File},
     io::{self, BufWriter},
     iter::Sum,
-    num::ParseFloatError,
-    ops::{Not, Range, RangeInclusive},
+    num::{ParseFloatError, Saturating},
+    ops::{ControlFlow, Not, Range, RangeInclusive},
     path::{Path, PathBuf},
     process,
     str::FromStr,
@@ -147,10 +147,13 @@ fn main() -> anyhow::Result<()> {
         })
         .transpose()?
         .unwrap_or_else(|| {
+            let db_shuffles =
+                db_shuffles.map_or_else(|| calc_db_shuffles_from_db(&db_entries), usize::from);
+
             make_shuffled_db(
                 &db_entries,
                 db_block_size.into(),
-                db_shuffles.into(),
+                db_shuffles,
                 cli.db_in_block_shuffle,
             )
         });
@@ -216,12 +219,11 @@ fn parse_cli_or_try_alternative() -> anyhow::Result<Cli> {
             println!("DB successfully dumped to {}.", dump_db.display());
 
             if let Some(shuffled_db_output_path) = dump_shuffled_db {
-                let shuffled_db = make_shuffled_db(
-                    &db,
-                    db_block_size.into(),
-                    db_shuffles.into(),
-                    db_in_block_shuffle,
-                );
+                let db_shuffles =
+                    db_shuffles.map_or_else(|| calc_db_shuffles_from_db(&db), usize::from);
+
+                let shuffled_db =
+                    make_shuffled_db(&db, db_block_size.into(), db_shuffles, db_in_block_shuffle);
 
                 let shuffled_db_file = File::create(&shuffled_db_output_path)
                     .context("unable to open output file for dumping shuffled db")?;
@@ -1578,6 +1580,27 @@ fn get_gapped_reactivities<'a>(
 
 trait Captures<T> {}
 impl<T: ?Sized, U> Captures<U> for T {}
+
+fn calc_db_shuffles_from_db(db_entries: &[db_file::Entry]) -> usize {
+    const LENGTH_DIVISOR: u32 = 500_000;
+
+    let (ControlFlow::Break(total_length) | ControlFlow::Continue(total_length)) = db_entries
+        .iter()
+        .map(|entry| Saturating(u32::try_from(entry.sequence.len()).unwrap_or(u32::MAX)))
+        .try_fold(Saturating(0u32), |acc, cur| {
+            let acc = acc + cur;
+            if acc.0 >= LENGTH_DIVISOR {
+                ControlFlow::Break(acc)
+            } else {
+                ControlFlow::Continue(acc)
+            }
+        });
+
+    (LENGTH_DIVISOR / total_length.0)
+        .max(1)
+        .try_into()
+        .unwrap_or(usize::MAX)
+}
 
 #[cfg(test)]
 mod tests {
