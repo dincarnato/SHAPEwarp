@@ -61,7 +61,7 @@ impl<'a> GappedSequence<'a> {
     }
 }
 
-impl<'a> GappedSequenceLike for GappedSequence<'a> {
+impl GappedSequenceLike for GappedSequence<'_> {
     #[inline]
     fn to_cstring(&self, molecule: Option<Molecule>) -> CString {
         // Rough estimation
@@ -165,7 +165,7 @@ pub(crate) struct GappedSequenceIter<'a> {
     alignment: slice::Iter<'a, BaseOrGap>,
 }
 
-impl<'a> Iterator for GappedSequenceIter<'a> {
+impl Iterator for GappedSequenceIter<'_> {
     type Item = StatefulBaseOrGap;
 
     #[inline]
@@ -195,7 +195,7 @@ impl<'a> Iterator for GappedSequenceIter<'a> {
     }
 }
 
-impl<'a> DoubleEndedIterator for GappedSequenceIter<'a> {
+impl DoubleEndedIterator for GappedSequenceIter<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
         match self.alignment.next_back()? {
             BaseOrGap::Base => self.bases.next_back().copied().map(StatefulBaseOrGap::Base),

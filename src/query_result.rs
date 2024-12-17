@@ -231,6 +231,7 @@ where
     }
 }
 
+#[allow(clippy::ref_option)] // The signature is because of serde
 fn display_scientific_opt<T>(x: &Option<T>) -> String
 where
     T: Float + FromPrimitive + Display + fmt::LowerExp,

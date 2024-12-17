@@ -292,32 +292,29 @@ impl<'a> QueryResultHandler<'a> {
         let block_size = cli.alignment_folding_eval_args.block_size;
         null_model_energies.clear();
         null_model_energies.extend((0..cli.alignment_folding_eval_args.shuffles).map(move |_| {
-            match &mut block_indices_buffer {
-                Some(block_indices_buffer) => {
-                    let gapped_data = gapped_data.clone().shuffled_in_blocks(
-                        block_size,
-                        &mut indices_buffer,
-                        block_indices_buffer,
-                        rng,
-                    );
+            if let Some(block_indices_buffer) = &mut block_indices_buffer {
+                let gapped_data = gapped_data.clone().shuffled_in_blocks(
+                    block_size,
+                    &mut indices_buffer,
+                    block_indices_buffer,
+                    rng,
+                );
 
-                    let sequences = [gapped_data.target(), gapped_data.query()];
-                    let (_, mfe) = alifold_mfe(&sequences, &sequences, cli);
+                let sequences = [gapped_data.target(), gapped_data.query()];
+                let (_, mfe) = alifold_mfe(&sequences, &sequences, cli);
 
-                    mfe
-                }
-                None => {
-                    let gapped_data = gapped_data.clone().shuffled(
-                        cli.alignment_folding_eval_args.block_size,
-                        &mut indices_buffer,
-                        rng,
-                    );
+                mfe
+            } else {
+                let gapped_data = gapped_data.clone().shuffled(
+                    cli.alignment_folding_eval_args.block_size,
+                    &mut indices_buffer,
+                    rng,
+                );
 
-                    let sequences = [gapped_data.target(), gapped_data.query()];
-                    let (_, mfe) = alifold_mfe(&sequences, &sequences, cli);
+                let sequences = [gapped_data.target(), gapped_data.query()];
+                let (_, mfe) = alifold_mfe(&sequences, &sequences, cli);
 
-                    mfe
-                }
+                mfe
             }
         }));
         let dist = NormDist::from_sample(null_model_energies.as_slice());

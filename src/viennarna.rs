@@ -1151,10 +1151,10 @@ pub struct FoldCompoundCommonMut<'a> {
     pub ptype_local: &'a mut *mut *mut c_char,
 }
 
-impl<'a> FoldCompoundCommonMut<'a> {
+impl FoldCompoundCommonMut<'_> {
     #[cfg(test)]
     #[inline]
-    pub fn params(&mut self) -> Option<&'a mut FreeEnergyParameters> {
+    pub fn params(&mut self) -> Option<&mut FreeEnergyParameters> {
         self.params.is_null().not().then(|| {
             // Safety:
             // - pointer is not null (just checked).
@@ -1888,7 +1888,7 @@ pub struct EnergyUnpairedProbabilities<'a, T> {
     len: usize,
 }
 
-impl<'a, T> EnergyUnpairedProbabilities<'a, T> {
+impl<T> EnergyUnpairedProbabilities<'_, T> {
     pub fn get(&self, index: usize) -> OptionalSliceElement<&[T]> {
         self.data
             .get(index)
@@ -1920,7 +1920,7 @@ where
     }
 }
 
-impl<'a, T: Copy> EnergyUnpairedProbabilities<'a, T> {
+impl<T: Copy> EnergyUnpairedProbabilities<'_, T> {
     #[inline]
     pub fn into_iter(self) -> <Self as IntoIterator>::IntoIter {
         IntoIterator::into_iter(self)
@@ -2570,7 +2570,7 @@ impl<'a> HardConstraintsMatrixLocal<'a> {
     }
 }
 
-impl<'a> PartialEq for HardConstraintsMatrixLocal<'a> {
+impl PartialEq for HardConstraintsMatrixLocal<'_> {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.inner.len() == other.inner.len() && self.inner.iter().eq(other.inner)
@@ -2824,7 +2824,7 @@ impl<'a> Iterator for HardConstraintNucsIter<'a> {
     }
 }
 
-impl<'a> DoubleEndedIterator for HardConstraintNucsIter<'a> {
+impl DoubleEndedIterator for HardConstraintNucsIter<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
         let ptr = *self.inner.next_back()?;
         let size = *self.sizes.next_back().unwrap();
@@ -2952,7 +2952,7 @@ impl<'a> Iterator for HardConstraintBasePairsIter<'a> {
     }
 }
 
-impl<'a> DoubleEndedIterator for HardConstraintBasePairsIter<'a> {
+impl DoubleEndedIterator for HardConstraintBasePairsIter<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
         let ptr = *self.inner.next_back()?;
         let size = *self.sizes.next_back().unwrap();
@@ -3695,7 +3695,7 @@ mod inner {
         }
     }
 
-    impl<'a> DoubleEndedIterator for OptionCStrSliceIter<'a> {
+    impl DoubleEndedIterator for OptionCStrSliceIter<'_> {
         #[inline]
         fn next_back(&mut self) -> Option<Self::Item> {
             self.0.next_back().copied().map(|ptr| {
@@ -3712,7 +3712,7 @@ mod inner {
         }
     }
 
-    impl<'a> ExactSizeIterator for OptionCStrSliceIter<'a> {
+    impl ExactSizeIterator for OptionCStrSliceIter<'_> {
         #[inline]
         fn len(&self) -> usize {
             self.0.len()
@@ -3841,7 +3841,7 @@ mod inner {
         }
     }
 
-    impl<'a> DoubleEndedIterator for CStrSliceIter<'a> {
+    impl DoubleEndedIterator for CStrSliceIter<'_> {
         #[inline]
         fn next_back(&mut self) -> Option<Self::Item> {
             self.0.next_back().copied().map(|ptr| {
@@ -3856,7 +3856,7 @@ mod inner {
         }
     }
 
-    impl<'a> ExactSizeIterator for CStrSliceIter<'a> {
+    impl ExactSizeIterator for CStrSliceIter<'_> {
         #[inline]
         fn len(&self) -> usize {
             self.0.len()
@@ -3917,7 +3917,7 @@ mod inner {
 
     impl<T: Eq> Eq for FoldCompoundSequenceData<'_, T> {}
 
-    impl<'a, T> Index<usize> for FoldCompoundSequenceData<'a, T> {
+    impl<T> Index<usize> for FoldCompoundSequenceData<'_, T> {
         type Output = [T];
 
         #[inline]

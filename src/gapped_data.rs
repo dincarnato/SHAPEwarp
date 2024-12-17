@@ -66,7 +66,7 @@ impl<'a, T> GappedData<'a, T> {
                     usize::from(block_size),
                     block_indices_buffer,
                     len,
-                    different_block,
+                    different_block.as_ref(),
                     rng,
                 )
             },
@@ -149,7 +149,7 @@ fn shuffle_inner_indices_blocks<'a, R>(
     block_size: usize,
     block_indices_buffer: &'a mut Vec<usize>,
     len: usize,
-    different_block: &Option<DifferentBlock>,
+    different_block: Option<&DifferentBlock>,
     rng: &mut R,
 ) -> &'a [usize]
 where
@@ -207,7 +207,7 @@ pub(crate) struct Shuffled<'a, 'b, R, B> {
     block_indices: B,
 }
 
-impl<'a, 'b, R, B> Shuffled<'a, 'b, R, B>
+impl<'b, R, B> Shuffled<'_, 'b, R, B>
 where
     B: Copy,
 {
@@ -447,7 +447,7 @@ pub(crate) trait InternalBlockIter<'a, 'b, T: 'a>: Sized {
     type Iterator: Sized + Iterator<Item = T>;
 }
 
-impl<'a, 'b, T: 'a + Copy> InternalBlockIter<'a, 'b, T> for () {
+impl<'a, T: 'a + Copy> InternalBlockIter<'a, '_, T> for () {
     type Iterator = SimpleBlockIterator<'a, T>;
 }
 
@@ -480,7 +480,7 @@ impl<'a, T: 'a + Copy> Iterator for SimpleBlockIterator<'a, T> {
     }
 }
 
-impl<'a, 'b, T: 'a + Copy> Iterator for RandomAccessBlockIterator<'a, 'b, T> {
+impl<'a, T: 'a + Copy> Iterator for RandomAccessBlockIterator<'a, '_, T> {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -634,11 +634,13 @@ where
     ShuffledSequenceDataIter<'a, 'b, R, B>: Iterator<Item = R>,
     B: InternalBlockIter<'a, 'b, R> + Copy,
 {
-    type AlignmentIter<'c> = ShuffledAlignment<'a, 'b>
+    type AlignmentIter<'c>
+        = ShuffledAlignment<'a, 'b>
     where
         Self: 'c;
 
-    type ReactivityIter<'c> = ShuffledSequenceDataIter<'a, 'b, R, B>
+    type ReactivityIter<'c>
+        = ShuffledSequenceDataIter<'a, 'b, R, B>
     where
         Self: 'c;
 
@@ -736,7 +738,7 @@ mod tests {
             usize::from(block_size),
             &mut block_indices,
             data.len(),
-            &different_block,
+            different_block.as_ref(),
             &mut rng,
         );
 
@@ -873,7 +875,7 @@ mod tests {
             usize::from(block_size),
             &mut block_indices,
             alignment_len,
-            &different_block,
+            different_block.as_ref(),
             &mut rng,
         );
         assert_eq!(block_indices.len(), alignment_len);

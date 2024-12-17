@@ -1097,7 +1097,7 @@ struct EntryElement<T> {
     reactivity: T,
 }
 
-impl<'a, T: Copy> Iterator for EntryIterFw<'a, T> {
+impl<T: Copy> Iterator for EntryIterFw<'_, T> {
     type Item = EntryElement<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -1108,7 +1108,7 @@ impl<'a, T: Copy> Iterator for EntryIterFw<'a, T> {
     }
 }
 
-impl<'a, T: Copy> Iterator for EntryIterBw<'a, T> {
+impl<T: Copy> Iterator for EntryIterBw<'_, T> {
     type Item = EntryElement<T>;
 
     fn next(&mut self) -> Option<Self::Item> {

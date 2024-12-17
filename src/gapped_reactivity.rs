@@ -26,7 +26,7 @@ pub(crate) trait GappedReactivityLike<R> {
     fn reactivity(&self) -> Self::ReactivityIter<'_>;
 }
 
-impl<'a, T> Serialize for GappedReactivity<'a, T>
+impl<T> Serialize for GappedReactivity<'_, T>
 where
     T: ReactivityLike + Serialize,
 {
@@ -143,7 +143,7 @@ pub(crate) enum GappedReactivityValue<T> {
     Gap,
 }
 
-impl<'a, T> Iterator for GappedReactivityIter<'a, T>
+impl<T> Iterator for GappedReactivityIter<'_, T>
 where
     T: Copy,
 {

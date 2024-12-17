@@ -114,7 +114,12 @@ fn try_fold_from_bytes(
             working_buffer,
         )),
 
-        b')' => handle_closing_bracket(&partial, index, paired_blocks_buffer, working_buffer),
+        b')' => handle_closing_bracket(
+            partial.as_ref(),
+            index,
+            paired_blocks_buffer,
+            working_buffer,
+        ),
 
         _ => Err(InvalidDotBracket),
     }
@@ -191,12 +196,12 @@ fn handle_dot(
 }
 
 fn handle_closing_bracket(
-    partial: &Option<PartialPairedBlockUnstored>,
+    partial: Option<&PartialPairedBlockUnstored>,
     index: usize,
     paired_blocks_buffer: &mut Vec<PairedBlock>,
     working_buffer: &mut Vec<PartialPairedBlock>,
 ) -> Result<Option<PartialPairedBlockUnstored>, InvalidDotBracket> {
-    match *partial {
+    match partial {
         None => {
             let PartialPairedBlock { left } = working_buffer.pop().ok_or(InvalidDotBracket)?;
             if left.end - left.start == 1 {
@@ -216,7 +221,7 @@ fn handle_closing_bracket(
             }
         }
 
-        Some(PartialPairedBlockUnstored {
+        Some(&PartialPairedBlockUnstored {
             left_start,
             other:
                 Some(PartialPairedBlockOther {
@@ -247,7 +252,7 @@ fn handle_closing_bracket(
             }
         },
 
-        Some(PartialPairedBlockUnstored {
+        Some(&PartialPairedBlockUnstored {
             left_start,
             other: None,
         }) => Ok(Some(PartialPairedBlockUnstored {

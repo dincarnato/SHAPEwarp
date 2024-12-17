@@ -185,7 +185,7 @@ impl<'a, 'cli, 'aln, Behavior> QueryAlignIterator<'a, 'cli, 'aln, Behavior> {
     }
 }
 
-impl<'a, 'cli, 'aln, Behavior> Iterator for QueryAlignIterator<'a, 'cli, 'aln, Behavior>
+impl<'a, Behavior> Iterator for QueryAlignIterator<'a, '_, '_, Behavior>
 where
     Behavior: AlignBehavior,
     <Behavior as AlignBehavior>::Alignment: std::fmt::Debug,
@@ -225,7 +225,7 @@ pub(crate) struct QueryAlignResult<'a, Alignment> {
     pub(crate) alignment: Arc<AlignmentResult<Alignment>>,
 }
 
-impl<'a, 'cli, 'aln, Behavior> Iterator for QueryAlignIteratorInner<'a, 'cli, 'aln, Behavior>
+impl<'a, Behavior> Iterator for QueryAlignIteratorInner<'a, '_, '_, Behavior>
 where
     Behavior: AlignBehavior,
     <Behavior as AlignBehavior>::Alignment: std::fmt::Debug,
