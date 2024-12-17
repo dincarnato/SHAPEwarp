@@ -320,12 +320,12 @@ fn run(
     if results.is_empty() {
         println!("No match found with current search settings.");
     } else {
-        use tabled::settings::{object, Disable, Style};
+        use tabled::settings::{object, Remove, Style};
 
         let mut table = Table::new(results);
         table.with(Style::empty());
         if cli.alignment_folding_eval_args.eval_align_fold.not() {
-            table.with(Disable::column(object::Columns::new(11..14)));
+            table.with(Remove::column(object::Columns::new(11..14)));
         }
         println!("{table}");
     }
