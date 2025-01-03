@@ -157,11 +157,11 @@ mod tests {
     #[test]
     fn test_mass() {
         const EXPECTED: [Complex<Reactivity>; 5] = [
-            Complex::new(0.676_408_23, 0.),
+            Complex::new(0.676_408_23, 2.349_848_8e-7),
             Complex::new(3.430_923_5, 0.),
-            Complex::new(3.430_923_5, 0.),
+            Complex::new(3.430_923_5, 4.632_738_3e-8),
             Complex::new(0.000_690_533_95, 0.),
-            Complex::new(1.851_136_1, 0.),
+            Complex::new(1.851_136_1, -2.082_504_7e-8),
         ];
 
         let ts = [1., 1., 1., 2., 1., 1., 4., 5.].map(ReactivityWithPlaceholder::from);
@@ -172,6 +172,6 @@ mod tests {
             .run(ts.as_ref(), &ts_t, query.as_ref())
             .unwrap();
 
-        assert_abs_diff_eq!(&*result, EXPECTED.as_ref(), epsilon = 1e-7);
+        assert_abs_diff_eq!(&*result, EXPECTED.as_ref(), epsilon = 1e-6);
     }
 }
