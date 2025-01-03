@@ -35,7 +35,29 @@ Please see <http://www.gnu.org/licenses/> for more information.
 
 - Linux system
 - Rust and Cargo (Installation instructions: <https://doc.rust-lang.org/cargo/getting-started/installation.html>)
+- [FFTW](http://fftw.org/) 3.x library.
 
+## Installation of FFTW
+
+This library is generally provided by package managers, keep in mind that some distros split the `-dev` package (which are needed to compile projects depending on the library) from the main one.
+
+### Debian based distros (i.e. Debian, Ubuntu)
+
+```bash
+sudo apt install libfftw3-dev
+```
+
+### Red-Hat based distros (i.e. Fedora, CentOS, Alma Linux)
+
+```bash
+sudo dnf install fftw-devel
+```
+
+### Arch based distros (i.e. Arch, Manjaro)
+
+```bash
+sudo pacman -S fftw
+```
 
 ## Installation
 
