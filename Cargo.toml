@@ -9,7 +9,7 @@ anyhow = "1.0.58"
 bitflags = "2.3.1"
 clap = { version = "4.3.0", features = ["derive"] }
 csv = "1.1.6"
-fftw = "0.8.0"
+fftw = { version = "0.8.0", default-features = false, features = ["system"] }
 fnv = "1.0.7"
 itertools = "0.10.3"
 ndarray = "0.15.4"
