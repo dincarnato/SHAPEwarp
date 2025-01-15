@@ -42,4 +42,4 @@ pkg-config = "0.3.27"
 semver = "1.0.18"
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(vrna24)', 'cfg(vrna25)', 'cfg(vrna251)', 'cfg(vrna26)'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(vrna24)', 'cfg(vrna25)', 'cfg(vrna251)', 'cfg(vrna26)', 'cfg(vrna27)'] }

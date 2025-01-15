@@ -2,7 +2,7 @@ use semver::Version;
 
 fn main() {
     let vrna = pkg_config::Config::new()
-        .range_version("2.4.18".."2.7")
+        .range_version("2.4.18".."2.8")
         .cargo_metadata(false)
         .env_metadata(false)
         .print_system_libs(false)

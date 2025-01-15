@@ -36,13 +36,13 @@ pub use self::inner::*;
 #[cfg(any(vrna24, vrna25))]
 type AuxdataFree = viennarna_mfe_sys::vrna_callback_free_auxdata;
 
-#[cfg(vrna26)]
+#[cfg(any(vrna26, vrna27))]
 type AuxdataFree = viennarna_mfe_sys::vrna_auxdata_free_f;
 
 #[cfg(any(vrna24, vrna25))]
 type RecursionStatus = viennarna_mfe_sys::vrna_callback_recursion_status;
 
-#[cfg(vrna26)]
+#[cfg(any(vrna26, vrna27))]
 type RecursionStatus = viennarna_mfe_sys::vrna_recursion_status_f;
 
 // Placeholder for core::ffi::c_size_t
@@ -113,7 +113,12 @@ impl PartialEq for ModelDetails {
             & (self.0.noGU == other.0.noGU)
             & (self.0.noGUclosure == other.0.noGUclosure)
             & (self.0.logML == other.0.logML)
-            & (self.0.circ == other.0.circ)
+            & (self.0.circ == other.0.circ);
+
+        #[cfg(vrna27)]
+        let base_check = base_check & (self.0.circ_penalty == other.0.circ_penalty);
+
+        let base_check = base_check
             & (self.0.gquad == other.0.gquad)
             & (self.0.uniq_ML == other.0.uniq_ML)
             & (self.0.energy_set == other.0.energy_set)
@@ -133,10 +138,10 @@ impl PartialEq for ModelDetails {
             & (self.0.alias == other.0.alias)
             & (self.0.pair == other.0.pair);
 
-        #[cfg(any(vrna25, vrna26))]
+        #[cfg(any(vrna25, vrna26, vrna27))]
         let base_check = base_check & (self.0.pair_dist == other.0.pair_dist);
 
-        #[cfg(vrna26)]
+        #[cfg(any(vrna26, vrna27))]
         let base_check = base_check
             & (self.0.salt == other.0.salt)
             & (self.0.saltMLLower == other.0.saltMLLower)
@@ -145,6 +150,9 @@ impl PartialEq for ModelDetails {
             & (self.0.saltDPXInitFact == other.0.saltDPXInitFact)
             & (self.0.helical_rise == other.0.helical_rise)
             & (self.0.backbone_length == other.0.backbone_length);
+
+        #[cfg(vrna27)]
+        let base_check = base_check & (self.0.circ_alpha0 == other.0.circ_alpha0);
 
         #[allow(clippy::let_and_return)]
         base_check
@@ -322,7 +330,12 @@ impl FoldCompound {
             )
         };
 
-        if ret == 1 {
+        // In ViennaRNA 2.7 `vrna_sc_set_stack_comparative` returns the number of sequences with
+        // constraints, before 1 was returned in case the base checks passed.
+        if (cfg!(vrna27)
+            && ret.try_into() == Ok(self.split_mut().into_comparative().unwrap().1 .0.n_seq))
+            || ret == 1
+        {
             Ok(())
         } else {
             Err(AddShapeReactivityError::Vienna)
@@ -343,7 +356,7 @@ impl FoldCompound {
             cutpoint,
             strand_number,
             strand_order,
-            #[cfg(any(vrna25, vrna26))]
+            #[cfg(any(vrna25, vrna26, vrna27))]
             strand_order_uniq,
             strand_start,
             strand_end,
@@ -383,7 +396,7 @@ impl FoldCompound {
             cutpoint,
             strand_number,
             strand_order,
-            #[cfg(any(vrna25, vrna26))]
+            #[cfg(any(vrna25, vrna26, vrna27))]
             strand_order_uniq,
             strand_start,
             strand_end,
@@ -427,7 +440,7 @@ impl FoldCompound {
             cutpoint,
             strand_number,
             strand_order,
-            #[cfg(any(vrna25, vrna26))]
+            #[cfg(any(vrna25, vrna26, vrna27))]
             strand_order_uniq,
             strand_start,
             strand_end,
@@ -467,7 +480,7 @@ impl FoldCompound {
             cutpoint,
             strand_number,
             strand_order,
-            #[cfg(any(vrna25, vrna26))]
+            #[cfg(any(vrna25, vrna26, vrna27))]
             strand_order_uniq,
             strand_start,
             strand_end,
@@ -658,7 +671,7 @@ pub struct FoldCompoundCommon<'a> {
     pub cutpoint: &'a c_int,
     pub strand_number: &'a *mut c_uint,
     pub strand_order: &'a *mut c_uint,
-    #[cfg(any(vrna25, vrna26))]
+    #[cfg(any(vrna25, vrna26, vrna27))]
     pub strand_order_uniq: &'a *mut c_uint,
     pub strand_start: &'a *mut c_uint,
     pub strand_end: &'a *mut c_uint,
@@ -677,7 +690,10 @@ pub struct FoldCompoundCommon<'a> {
     pub free_auxdata: &'a AuxdataFree,
     pub domains_struc: &'a *mut vrna_sd_t,
     pub domains_up: &'a *mut vrna_ud_t,
+    #[cfg(any(vrna24, vrna25, vrna26))]
     pub aux_grammar: &'a *mut vrna_gr_aux_t,
+    #[cfg(vrna27)]
+    pub aux_grammar: &'a vrna_gr_aux_t,
     pub max_d1: &'a c_uint,
     pub max_d2: &'a c_uint,
     pub reference_pt1: &'a *mut c_short,
@@ -715,7 +731,7 @@ impl<'a> FoldCompoundCommon<'a> {
     }
 
     #[inline]
-    #[cfg(any(vrna25, vrna26))]
+    #[cfg(any(vrna25, vrna26, vrna27))]
     pub fn strand_order_uniq(&self) -> Option<&[c_uint]> {
         self.strand_order_uniq.is_null().not().then(|| {
             // Safety:
@@ -1030,7 +1046,9 @@ impl PartialEq for FoldCompoundCommon<'_> {
             & (self.length == other.length)
             & (self.cutpoint == other.cutpoint)
             & (self.strand_number() == other.strand_number())
-            & (self.strand_order() == other.strand_order())
+            & (self.strand_order() == other.strand_order());
+
+        let base_check = base_check
             & (self.strand_start() == other.strand_start())
             & (self.strand_end() == other.strand_end())
             & (self.strands == other.strands)
@@ -1055,7 +1073,7 @@ impl PartialEq for FoldCompoundCommon<'_> {
             & (self.window_size == other.window_size)
             & (self.ptype_local() == other.ptype_local());
 
-        #[cfg(any(vrna25, vrna26))]
+        #[cfg(any(vrna25, vrna26, vrna27))]
         let base_check = base_check & (self.strand_order_uniq() == other.strand_order_uniq());
 
         base_check
@@ -1073,7 +1091,7 @@ impl fmt::Debug for FoldCompoundCommon<'_> {
             .field("strand_number", &self.strand_number())
             .field("strand_order", &self.strand_order());
 
-        #[cfg(any(vrna25, vrna26))]
+        #[cfg(any(vrna25, vrna26, vrna27))]
         let builder = builder.field("strand_order_uniq", &self.strand_order_uniq());
 
         builder
@@ -1118,7 +1136,7 @@ pub struct FoldCompoundCommonMut<'a> {
     pub cutpoint: &'a mut c_int,
     pub strand_number: &'a mut *mut c_uint,
     pub strand_order: &'a mut *mut c_uint,
-    #[cfg(any(vrna25, vrna26))]
+    #[cfg(any(vrna25, vrna26, vrna27))]
     pub strand_order_uniq: &'a mut *mut c_uint,
     pub strand_start: &'a mut *mut c_uint,
     pub strand_end: &'a mut *mut c_uint,
@@ -1137,7 +1155,10 @@ pub struct FoldCompoundCommonMut<'a> {
     pub free_auxdata: &'a mut AuxdataFree,
     pub domains_struc: &'a mut *mut vrna_sd_t,
     pub domains_up: &'a mut *mut vrna_ud_t,
+    #[cfg(any(vrna24, vrna25, vrna26))]
     pub aux_grammar: &'a mut *mut vrna_gr_aux_t,
+    #[cfg(vrna27)]
+    pub aux_grammar: &'a mut vrna_gr_aux_t,
     pub max_d1: &'a mut c_uint,
     pub max_d2: &'a mut c_uint,
     pub reference_pt1: &'a mut *mut c_short,
@@ -1426,8 +1447,13 @@ impl<'a> FoldCompoundInnerComparative<'a> {
                     .expect("sequence too large for the current architecture"),
             );
 
+            #[cfg(vrna27)]
+            let a2s = self.a2s().expect("a2s should contain data at this point");
+
             OptionSoftConstraintSlice {
                 inner,
+                #[cfg(vrna27)]
+                a2s,
                 fold_compound: self.common.clone(),
             }
         })
@@ -1593,6 +1619,8 @@ impl PartialEq for SoftConstraintWindowEnergyRef<'_> {
 
 pub struct OptionSoftConstraintSlice<'a> {
     inner: &'a [*const vrna_sc_s],
+    #[cfg(vrna27)]
+    a2s: FoldCompoundSequenceData<'a, c_uint>,
     fold_compound: FoldCompoundCommon<'a>,
 }
 
@@ -1622,12 +1650,18 @@ impl<'a> IntoIterator for &'a OptionSoftConstraintSlice<'a> {
     fn into_iter(self) -> Self::IntoIter {
         let OptionSoftConstraintSlice {
             inner,
+            #[cfg(vrna27)]
+            a2s,
             fold_compound,
         } = self;
         let inner = inner.iter();
+        #[cfg(vrna27)]
+        let a2s = a2s.iter();
 
         OptionSoftConstraintIter {
             inner,
+            #[cfg(vrna27)]
+            a2s,
             fold_compound,
         }
     }
@@ -1635,6 +1669,8 @@ impl<'a> IntoIterator for &'a OptionSoftConstraintSlice<'a> {
 
 pub struct OptionSoftConstraintIter<'a> {
     inner: slice::Iter<'a, *const vrna_sc_s>,
+    #[cfg(vrna27)]
+    a2s: FoldCompoundSequenceDataIter<'a, c_uint>,
     fold_compound: &'a FoldCompoundCommon<'a>,
 }
 
@@ -1644,17 +1680,22 @@ impl<'a> Iterator for OptionSoftConstraintIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let Self {
             inner,
+            #[cfg(vrna27)]
+            a2s,
             fold_compound,
         } = self;
 
-        inner.next().map(|&ptr| {
+        inner.next().zip(a2s.next()).map(|(&ptr, a2s)| {
             ptr.is_null().not().then(|| {
                 // Safety:
                 // - pointer is not null (just checked).
                 // - invariances are granted by upstream and downstream structures.
                 let inner = unsafe { &*ptr };
+
                 SoftConstraint {
                     inner,
+                    #[cfg(vrna27)]
+                    a2s,
                     fold_compound,
                 }
             })
@@ -1665,6 +1706,8 @@ impl<'a> Iterator for OptionSoftConstraintIter<'a> {
 #[derive(Clone)]
 pub struct SoftConstraint<'a> {
     inner: &'a vrna_sc_s,
+    #[cfg(vrna27)]
+    a2s: &'a [u32],
     fold_compound: &'a FoldCompoundCommon<'a>,
 }
 
@@ -1804,9 +1847,14 @@ impl SoftConstraint<'_> {
         self.inner.energy_stack.is_null().not().then(|| {
             let len = usize::try_from(*self.fold_compound.length).unwrap();
 
+            #[cfg(vrna27)]
+            let len = usize::try_from(self.a2s[len]).unwrap();
+
             // Safety:
             // - pointer is not null (just checked)
-            // - when allocated, `energy_stack` is uses `fc.length + 1` as len (see soft.c)
+            // - when allocated, `energy_stack` is uses `fc.length + 1` as len in versions prior to
+            //   2.7, or `fc.a2s[s][fc.length] + 1` in version 2.7 where `s` is the index of the
+            //   sequence (see soft.c)
             unsafe { slice::from_raw_parts(self.inner.energy_stack, len + 1) }
         })
     }
@@ -2305,17 +2353,31 @@ impl<'a> HardConstraints<'a> {
     pub fn to_enum(self) -> HardConstraintsEnum<'a> {
         match self.ty() {
             HardConstraintsType::Default => {
-                // Safety:
-                // the variant of the union containing `mx` is acive only when `type` is `DEFAULT`.
-                let mx = unsafe { self.inner.__bindgen_anon_1.__bindgen_anon_1.mx };
+                let mx = {
+                    #[cfg(any(vrna24, vrna25, vrna26))]
+                    // Safety:
+                    // the type is set to `DEFAULT`
+                    unsafe {
+                        self.mx()
+                    }
+
+                    #[cfg(vrna27)]
+                    self.mx()
+                };
                 HardConstraintsEnum::Default(HardConstraintsDefault { inner: self, mx })
             }
             HardConstraintsType::Window => {
-                // Safety:
-                // the variant of the union containing `matrix_local` is acive only when `type` is
-                // `WINDOW`.
-                let matrix_local =
-                    unsafe { self.inner.__bindgen_anon_1.__bindgen_anon_2.matrix_local };
+                let matrix_local = {
+                    #[cfg(any(vrna24, vrna25, vrna26))]
+                    // Safety:
+                    // the type is set to `WINDOW`
+                    unsafe {
+                        self.matrix_local()
+                    }
+
+                    #[cfg(vrna27)]
+                    self.matrix_local()
+                };
                 HardConstraintsEnum::Window(HardConstraintsWindow {
                     inner: self,
                     matrix_local,
@@ -2329,7 +2391,7 @@ impl<'a> HardConstraints<'a> {
         self.inner.n
     }
 
-    pub fn up_ext(&self) -> Option<&[c_int]> {
+    pub fn up_ext(&self) -> Option<&[hard_constraints::UpExt]> {
         self.inner.up_ext.is_null().not().then(|| {
             let len = usize::try_from(self.inner.n.checked_add(2).unwrap()).unwrap();
 
@@ -2340,7 +2402,7 @@ impl<'a> HardConstraints<'a> {
         })
     }
 
-    pub fn up_hp(&self) -> Option<&[c_int]> {
+    pub fn up_hp(&self) -> Option<&[hard_constraints::UpHp]> {
         self.inner.up_hp.is_null().not().then(|| {
             let len = usize::try_from(self.inner.n.checked_add(2).unwrap()).unwrap();
 
@@ -2351,7 +2413,7 @@ impl<'a> HardConstraints<'a> {
         })
     }
 
-    pub fn up_int(&self) -> Option<&[c_int]> {
+    pub fn up_int(&self) -> Option<&[hard_constraints::UpInt]> {
         self.inner.up_int.is_null().not().then(|| {
             let len = usize::try_from(self.inner.n.checked_add(2).unwrap()).unwrap();
 
@@ -2362,7 +2424,7 @@ impl<'a> HardConstraints<'a> {
         })
     }
 
-    pub fn up_ml(&self) -> Option<&[c_int]> {
+    pub fn up_ml(&self) -> Option<&[hard_constraints::UpMl]> {
         self.inner.up_ml.is_null().not().then(|| {
             let len = usize::try_from(self.inner.n.checked_add(2).unwrap()).unwrap();
 
@@ -2392,6 +2454,73 @@ impl<'a> HardConstraints<'a> {
             & (self.up_ml() == other.up_ml())
             & (self.depot() == other.depot())
     }
+
+    /// Gets the `mx` field from the `vrna_hc_s` struct.
+    ///
+    /// # Safety
+    ///
+    /// The variant of the anonymous union with the `mx` field must be active. This requirement is
+    /// generally granted by the `ViennaRNA` helper functions when `type` is set to `DEFAULT`.
+    #[cfg(any(vrna24, vrna25, vrna26))]
+    unsafe fn mx(&self) -> *mut c_uchar {
+        // Safety:
+        // the variant of the union containing `mx` is active only when `type` is `DEFAULT`.
+        unsafe { self.inner.__bindgen_anon_1.__bindgen_anon_1.mx }
+    }
+
+    /// Gets the `mx` field from the `vrna_hc_s` struct.
+    #[cfg(vrna27)]
+    fn mx(&self) -> *mut c_uchar {
+        self.inner.mx
+    }
+
+    /// Gets the `matrix_local` field from the `vrna_hc_s` struct.
+    ///
+    /// # Safety
+    ///
+    /// The variant of the anonymous union with the `matrix_local` field must be active. This
+    /// requirement is generally granted by the `ViennaRNA` helper functions when when `type` is set
+    /// to `WINDOW`.
+    #[cfg(any(vrna24, vrna25, vrna26))]
+    unsafe fn matrix_local(&self) -> *mut *mut c_uchar {
+        // Safety:
+        // the variant of the union containing `matrix_local` is acive only when `type` is
+        // `WINDOW`.
+        unsafe { self.inner.__bindgen_anon_1.__bindgen_anon_2.matrix_local }
+    }
+
+    /// Gets the `matrix_local` field from the `vrna_hc_s` struct.
+    #[cfg(vrna27)]
+    fn matrix_local(&self) -> *mut *mut c_uchar {
+        self.inner.matrix_local
+    }
+}
+
+pub mod hard_constraints {
+    #[cfg(any(vrna24, vrna25, vrna26))]
+    use std::ffi::c_int;
+    #[cfg(vrna27)]
+    use std::ffi::c_uint;
+
+    #[cfg(any(vrna24, vrna25, vrna26))]
+    pub type UpExt = c_int;
+    #[cfg(vrna27)]
+    pub type UpExt = c_uint;
+
+    #[cfg(any(vrna24, vrna25, vrna26))]
+    pub type UpHp = c_int;
+    #[cfg(vrna27)]
+    pub type UpHp = c_uint;
+
+    #[cfg(any(vrna24, vrna25, vrna26))]
+    pub type UpInt = c_int;
+    #[cfg(vrna27)]
+    pub type UpInt = c_uint;
+
+    #[cfg(any(vrna24, vrna25, vrna26))]
+    pub type UpMl = c_int;
+    #[cfg(vrna27)]
+    pub type UpMl = c_uint;
 }
 
 impl PartialEq for HardConstraints<'_> {
@@ -2439,7 +2568,7 @@ impl HardConstraintsDefault<'_> {
             .checked_pow(2)
             .unwrap();
 
-        #[cfg(any(vrna251, vrna26))]
+        #[cfg(any(vrna251, vrna26, vrna27))]
         let len = len.checked_add(1).unwrap();
 
         let len = len.try_into().unwrap();
@@ -4112,6 +4241,50 @@ mod tests {
         }
     }
 
+    #[cfg(vrna27)]
+    fn default_model_details() -> vrna_md_t {
+        vrna_md_t {
+            temperature: Default::default(),
+            betaScale: Default::default(),
+            pf_smooth: Default::default(),
+            dangles: Default::default(),
+            special_hp: Default::default(),
+            noLP: Default::default(),
+            noGU: Default::default(),
+            noGUclosure: Default::default(),
+            logML: Default::default(),
+            circ: Default::default(),
+            circ_penalty: Default::default(),
+            gquad: Default::default(),
+            uniq_ML: Default::default(),
+            energy_set: Default::default(),
+            backtrack: Default::default(),
+            backtrack_type: Default::default(),
+            compute_bpp: Default::default(),
+            nonstandards: [0; 64],
+            max_bp_span: Default::default(),
+            min_loop_size: Default::default(),
+            window_size: Default::default(),
+            oldAliEn: Default::default(),
+            ribo: Default::default(),
+            cv_fact: Default::default(),
+            nc_fact: Default::default(),
+            sfact: Default::default(),
+            rtype: Default::default(),
+            alias: Default::default(),
+            pair: Default::default(),
+            pair_dist: Default::default(),
+            salt: Default::default(),
+            saltMLLower: Default::default(),
+            saltMLUpper: Default::default(),
+            saltDPXInit: Default::default(),
+            saltDPXInitFact: Default::default(),
+            helical_rise: Default::default(),
+            backbone_length: Default::default(),
+            circ_alpha0: Default::default(),
+        }
+    }
+
     #[test]
     fn miri_vrna_md_t_from_model_details() {
         let model_details = default_model_details();
@@ -4242,7 +4415,14 @@ mod tests {
                 FoldCompoundOptions::DEFAULT.bits(),
             )
         };
-        assert_eq!(ret, 1);
+        if cfg!(vrna27) {
+            // `vrna_sc_set_stack_comparative` returns the number of sequences with constraints.
+            assert_eq!(ret, 2);
+        } else {
+            // `vrna_sc_set_stack_comparative` return 1 if the fold compound has the comparative
+            // and some constraints are given.
+            assert_eq!(ret, 1);
+        }
 
         temp_dir
             .close()
