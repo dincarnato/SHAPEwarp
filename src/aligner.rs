@@ -174,8 +174,7 @@ impl AlignBehavior for BacktrackBehavior {
 
         upstream.0.reverse();
         upstream.0.extend(
-            iter::repeat(BaseOrGap::Base)
-                .take(seed_size.get() - 1)
+            iter::repeat_n(BaseOrGap::Base, seed_size.get() - 1)
                 .chain(downstream.0.into_iter().skip(1)),
         );
         upstream
@@ -543,7 +542,7 @@ impl<'a> Aligner<'a> {
                 band_range_start - 1,
                 alignment_args,
             );
-        };
+        }
 
         let left = &*left;
         let query_band = query.slice((band_range_start - 1)..(band_range_end - 1));
@@ -1860,10 +1859,9 @@ mod tests {
         let query = query_file::Entry::new_unchecked(
             "query",
             vec![Base::T; 16],
-            iter::repeat(Reactivity::NAN)
-                .take(3)
-                .chain(iter::repeat(1.).take(8))
-                .chain(iter::repeat(Reactivity::NAN).take(5))
+            iter::repeat_n(Reactivity::NAN, 3)
+                .chain(iter::repeat_n(1., 8))
+                .chain(iter::repeat_n(Reactivity::NAN, 5))
                 .map(ReactivityWithPlaceholder::from)
                 .collect(),
             Molecule::Dna,
@@ -2006,10 +2004,9 @@ mod tests {
         let query = query_file::Entry::new_unchecked(
             "query",
             vec![Base::T; 16],
-            iter::repeat(Reactivity::NAN)
-                .take(5)
-                .chain(iter::repeat(1.).take(8))
-                .chain(iter::repeat(Reactivity::NAN).take(3))
+            iter::repeat_n(Reactivity::NAN, 5)
+                .chain(iter::repeat_n(1., 8))
+                .chain(iter::repeat_n(Reactivity::NAN, 3))
                 .map(ReactivityWithPlaceholder::from)
                 .collect(),
             Molecule::Dna,

@@ -348,7 +348,7 @@ impl FoldCompound {
         self.as_ref().type_ == vrna_fc_type_e_VRNA_FC_TYPE_COMPARATIVE
     }
 
-    fn split(&self) -> FoldCompoundSplit {
+    fn split(&self) -> FoldCompoundSplit<'_> {
         let inner = self.as_ref();
         let vrna_fc_s {
             type_,
@@ -432,7 +432,7 @@ impl FoldCompound {
         FoldCompoundSplit(common, anon)
     }
 
-    fn split_mut(&mut self) -> FoldCompoundSplitMut {
+    fn split_mut(&mut self) -> FoldCompoundSplitMut<'_> {
         let inner = self.as_mut();
         let vrna_fc_s {
             type_,
@@ -1190,6 +1190,10 @@ impl FoldCompoundCommonMut<'_> {
 pub struct FoldCompoundAnonInner<'a>(&'a vrna_fc_s__bindgen_ty_1);
 
 #[derive(Debug, PartialEq)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "we want to bind to the underlying fields of the union without allocating"
+)]
 pub enum FoldCompoundInner<'a> {
     Single(FoldCompoundInnerSingle<'a>),
     Comparative(FoldCompoundInnerComparative<'a>),

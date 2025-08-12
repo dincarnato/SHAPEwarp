@@ -428,9 +428,9 @@ mod tests {
     fn cap_reactivities() {
         const CONTENT: &str = include_str!("../test_data/valid_query.txt");
         let mut entries = read_file_content(Cursor::new(CONTENT)).unwrap();
-        entries
-            .iter_mut()
-            .for_each(|entry| entry.cap_reactivities(1.));
+        for entry in &mut entries {
+            entry.cap_reactivities(1.);
+        }
 
         assert!(reactivities_eq(
             entries[0].reactivities.iter().copied(),

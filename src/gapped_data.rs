@@ -791,11 +791,7 @@ mod tests {
             }
         }
         assert_eq!(
-            shuffled_sequence_data
-                .iter()
-                .copied()
-                .map(u16::from)
-                .sum::<u16>(),
+            shuffled_sequence_data.iter().copied().sum::<u16>(),
             u16::try_from(data.len()).unwrap() * (u16::try_from(data.len()).unwrap() - 1) / 2
         );
     }
@@ -833,7 +829,7 @@ mod tests {
 
     fn shuffled_gapped_inner_impl(block_size: u16, data_len: u16, gaps: &[Range<u16>]) {
         assert!(gaps.windows(2).all(|win| win[0].end < win[1].start));
-        assert!(gaps.last().map_or(true, |gap| gap.end <= data_len));
+        assert!(gaps.last().is_none_or(|gap| gap.end <= data_len));
 
         let data = (0..data_len).collect::<Vec<_>>();
         let mut indices = Vec::new();
@@ -844,9 +840,8 @@ mod tests {
                 .fold((Vec::new(), 0), |(mut alignment, used_bases), gap| {
                     let new_bases = gap.start - used_bases;
                     alignment.extend(
-                        iter::repeat(BaseOrGap::Base)
-                            .take(new_bases.into())
-                            .chain(iter::repeat(BaseOrGap::Gap).take((gap.end - gap.start).into())),
+                        iter::repeat_n(BaseOrGap::Base, new_bases.into())
+                            .chain(iter::repeat_n(BaseOrGap::Gap, (gap.end - gap.start).into())),
                     );
 
                     (alignment, used_bases + new_bases)
@@ -957,11 +952,7 @@ mod tests {
         }));
 
         assert_eq!(
-            shuffled_sequence_data
-                .iter()
-                .copied()
-                .map(u16::from)
-                .sum::<u16>(),
+            shuffled_sequence_data.iter().copied().sum::<u16>(),
             data_len * (data_len - 1) / 2
         );
     }

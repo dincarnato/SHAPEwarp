@@ -3,7 +3,7 @@ use std::{
     error::Error as StdError,
     fmt::{self, Display},
     fs::File,
-    io::{self, BufReader, Read, Seek, SeekFrom},
+    io::{self, BufRead, BufReader, Read, Seek, SeekFrom},
     path::Path,
     string::FromUtf8Error,
 };
@@ -28,7 +28,7 @@ pub struct Reader<R> {
 
 impl<R> Reader<R>
 where
-    R: Read + Seek,
+    R: BufRead + Seek,
 {
     pub fn new(mut reader: R) -> Result<Self, NewReaderError> {
         use NewReaderError as E;
@@ -53,7 +53,7 @@ where
         })
     }
 
-    pub fn entries(&mut self) -> EntryIter<R> {
+    pub fn entries(&mut self) -> EntryIter<'_, R> {
         let &mut Self {
             ref mut inner,
             end_offset,
@@ -107,7 +107,7 @@ pub struct EntryIter<'a, R> {
 
 impl<R> Iterator for EntryIter<'_, R>
 where
-    R: Seek + Read,
+    R: Seek + BufRead,
 {
     type Item = Result<Entry, NextEntryError>;
 
@@ -118,7 +118,7 @@ where
 
 impl<R> EntryIter<'_, R>
 where
-    R: Seek + Read,
+    R: Seek + BufRead,
 {
     fn next_entry(&mut self) -> Result<Entry, NextEntryError> {
         use NextEntryError as E;

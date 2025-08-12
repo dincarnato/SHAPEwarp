@@ -131,9 +131,11 @@ fn get_random_offset_and_chunks<R: Rng>(
     mut rng: R,
 ) -> (usize, usize) {
     let block_remainder = len % block_size;
-    let offset = (block_remainder > 0)
-        .then(|| rng.gen_range(0..block_remainder))
-        .unwrap_or(0);
+    let offset = if block_remainder > 0 {
+        rng.gen_range(0..block_remainder)
+    } else {
+        0
+    };
 
     let len_without_offset = len - offset;
     let aux_chunks = match (offset, len_without_offset % block_size) {
@@ -261,7 +263,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::fs::File;
+    use std::{fs::File, io::BufReader};
 
     use rand::rngs::{mock::StepRng, SmallRng};
 
@@ -287,7 +289,8 @@ mod tests {
         ];
 
         let mut db =
-            db_file::native::Reader::new(File::open("test_data/test.db").unwrap()).unwrap();
+            db_file::native::Reader::new(BufReader::new(File::open("test_data/test.db").unwrap()))
+                .unwrap();
         let entry = db.entries().next().unwrap().unwrap();
 
         assert_eq!(entry.sequence.len(), SEQUENCE_LEN);
@@ -345,7 +348,8 @@ mod tests {
         ];
 
         let mut db =
-            db_file::native::Reader::new(File::open("test_data/test.db").unwrap()).unwrap();
+            db_file::native::Reader::new(BufReader::new(File::open("test_data/test.db").unwrap()))
+                .unwrap();
         let entry = db.entries().next().unwrap().unwrap();
 
         assert_eq!(entry.sequence.len(), SEQUENCE_LEN);

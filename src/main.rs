@@ -140,9 +140,9 @@ fn main() -> anyhow::Result<()> {
         .as_deref()
         .map(|shuffled_db_path| {
             let mut shuffled_db = db_file::read_db(shuffled_db_path)?;
-            shuffled_db
-                .iter_mut()
-                .for_each(|entry| entry.cap_reactivities(cli.max_reactivity));
+            for entry in &mut shuffled_db {
+                entry.cap_reactivities(cli.max_reactivity);
+            }
             Ok::<_, db_file::Error>(shuffled_db)
         })
         .transpose()?
@@ -938,7 +938,7 @@ impl<'a> QueryMatchHandler<'a> {
             kmer_data
                 .into_iter()
                 .filter(move |(_, db_sequence)| {
-                    max_sequence_distance.map_or(true, move |max_sequence_distance| {
+                    max_sequence_distance.is_none_or(move |max_sequence_distance| {
                         {
                             u32::try_from(hamming_distance(kmer_sequence, db_sequence))
                                 .unwrap_or(u32::MAX)
@@ -947,7 +947,7 @@ impl<'a> QueryMatchHandler<'a> {
                     })
                 })
                 .filter(move |(_, db_sequence)| {
-                    max_gc_diff.map_or(true, move |max_gc_diff| {
+                    max_gc_diff.is_none_or(move |max_gc_diff| {
                         let gc_count = db_sequence
                             .iter()
                             .filter(|&&c| matches!(c, Base::C | Base::G))
